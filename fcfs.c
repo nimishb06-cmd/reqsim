@@ -45,6 +45,33 @@ void fcfs()
 
         total_waiting += waiting[i];
     }
+    printf("\nGANTT CHART\n\n");
+
+    printf(" ");
+    for(i = 0; i < n; i++)
+        printf("-------");
+    printf("-\n");
+
+    printf("|");
+    for(i = 0; i < n; i++)
+        printf("  R%d  |", i + 1);
+    printf("\n ");
+
+    for(i = 0; i < n; i++)
+        printf("-------");
+    printf("-\n");
+
+    current = 0;
+    printf("%d", current);
+
+    for(i = 0; i < n; i++)
+    {
+        if(current < arrival[i])
+            current = arrival[i];
+
+        current += burst[i];
+        printf("      %d", current);
+    }
 
     printf("\nREQ\tAT\tBT\tCT\tTAT\tWT\n");
 

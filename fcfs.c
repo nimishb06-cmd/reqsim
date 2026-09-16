@@ -24,7 +24,7 @@ void fcfs()
         printf("\nRequest %d arrival time: ", i + 1);
         scanf("%d", &arrival[i]);
 
-        printf("Request %d service time: ", i + 1);
+        printf("Request %d burst time: ", i + 1);
         scanf("%d", &burst[i]);
     }
 

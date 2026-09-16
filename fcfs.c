@@ -2,8 +2,7 @@
 
 void priority()
 {
-    int n;
-    int i, j;
+    int n, i, j;
     int temp;
 
     int id[20];

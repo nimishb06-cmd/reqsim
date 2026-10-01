@@ -2,68 +2,114 @@ import java.util.Scanner;
 
 public class FCFS {
 
-    public static void run() {
+    public static void fcfs() {
 
         Scanner sc = new Scanner(System.in);
 
-        System.out.print(
-                "Enter number of processes: ");
+        int[] at = new int[20];
+        int[] bt = new int[20];
+        int[] ct = new int[20];
+        int[] tat = new int[20];
+        int[] wt = new int[20];
+        int[] id = new int[20];
 
-        int n = sc.nextInt();
+        int n, i, j, temp;
+        int current = 0;
+        float avgWT = 0, avgTAT = 0;
 
-        int[] burst = new int[n];
-        int[] waiting = new int[n];
-        int[] turnaround = new int[n];
+        System.out.println("\n===== FCFS EMERGENCY QUEUE =====");
+        System.out.print("Enter number of requests: ");
+        n = sc.nextInt();
 
-        for (int i = 0; i < n; i++) {
+        // Input
+        for (i = 0; i < n; i++) {
+            id[i] = i + 1;
 
-            System.out.print(
-                    "Burst time P" + (i + 1) + ": ");
+            System.out.print("\nRequest " + (i + 1) + " Arrival Time: ");
+            at[i] = sc.nextInt();
 
-            burst[i] = sc.nextInt();
+            System.out.print("Request " + (i + 1) + " Burst Time: ");
+            bt[i] = sc.nextInt();
         }
 
-        waiting[0] = 0;
+        // Sort by Arrival Time
+        for (i = 0; i < n - 1; i++) {
+            for (j = i + 1; j < n; j++) {
+                if (at[i] > at[j]) {
 
-        for (int i = 1; i < n; i++) {
+                    temp = at[i];
+                    at[i] = at[j];
+                    at[j] = temp;
 
-            waiting[i] =
-                    waiting[i - 1] + burst[i - 1];
+                    temp = bt[i];
+                    bt[i] = bt[j];
+                    bt[j] = temp;
+
+                    temp = id[i];
+                    id[i] = id[j];
+                    id[j] = temp;
+                }
+            }
         }
 
-        for (int i = 0; i < n; i++) {
+        // FCFS Calculation
+        current = 0;
 
-            turnaround[i] =
-                    waiting[i] + burst[i];
+        for (i = 0; i < n; i++) {
+
+            if (current < at[i])
+                current = at[i];
+
+            current += bt[i];
+
+            ct[i] = current;
+            tat[i] = ct[i] - at[i];
+            wt[i] = tat[i] - bt[i];
+
+            avgWT += wt[i];
+            avgTAT += tat[i];
         }
 
-        double avgWaiting = 0;
-        double avgTurnaround = 0;
+        // Output Table
+        System.out.println("\nREQ\tAT\tBT\tCT\tTAT\tWT");
 
-        System.out.println(
-                "\nProcess\tBurst\tWaiting\tTurnaround");
-
-        for (int i = 0; i < n; i++) {
-
-            System.out.println(
-                    "P" + (i + 1)
-                    + "\t"
-                    + burst[i]
-                    + "\t"
-                    + waiting[i]
-                    + "\t"
-                    + turnaround[i]);
-
-            avgWaiting += waiting[i];
-            avgTurnaround += turnaround[i];
+        for (i = 0; i < n; i++) {
+            System.out.println("R" + id[i] + "\t" + at[i] + "\t" + bt[i]
+                    + "\t" + ct[i] + "\t" + tat[i] + "\t" + wt[i]);
         }
 
-        System.out.println(
-                "\nAverage Waiting Time = "
-                + avgWaiting / n);
+        // Gantt Chart
+        System.out.println("\nGANTT CHART\n");
 
-        System.out.println(
-                "Average Turnaround Time = "
-                + avgTurnaround / n);
+        System.out.print(" ");
+        for (i = 0; i < n; i++)
+            System.out.print("-------");
+        System.out.println("-");
+
+        System.out.print("|");
+        for (i = 0; i < n; i++)
+            System.out.print(" R" + id[i] + " |");
+        System.out.println();
+
+        System.out.print(" ");
+        for (i = 0; i < n; i++)
+            System.out.print("-------");
+        System.out.println("-");
+
+        current = 0;
+        System.out.print(current);
+
+        for (i = 0; i < n; i++) {
+            if (current < at[i])
+                current = at[i];
+
+            current += bt[i];
+            System.out.print("      " + current);
+        }
+
+        System.out.printf("\n\nAverage Turnaround Time = %.2f",
+                avgTAT / n);
+        System.out.printf("\nAverage Waiting Time = %.2f\n",
+                avgWT / n);
     }
 }

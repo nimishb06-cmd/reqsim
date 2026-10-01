@@ -17,11 +17,11 @@ public class Victim {
             System.out.println("5. Request Resource");
             System.out.println("6. Back");
 
-            System.out.print("Enter choice: ");
-            int choice = sc.nextInt();
+            System.out.print("Enter Choice: ");
+            int ch = sc.nextInt();
             sc.nextLine();
 
-            switch (choice) {
+            switch (ch) {
 
                 case 1:
                     register();
@@ -47,82 +47,52 @@ public class Victim {
                     return;
 
                 default:
-                    System.out.println("Invalid choice.");
+                    System.out.println("Invalid Choice");
             }
         }
     }
 
+    // 1. Registration
     static void register() {
 
-        try (Connection con = Database.getConnection()) {
+        try {
+
+            Connection con = DBConnection.getConnection();
 
             System.out.print("Name: ");
             String name = sc.nextLine();
 
-            System.out.print("Email: ");
-            String email = sc.nextLine();
-
             System.out.print("Phone: ");
             String phone = sc.nextLine();
 
-            System.out.print("Password: ");
-            String password = sc.nextLine();
+            String sql = "INSERT INTO VICTIM(name,phone,status) VALUES(?,?,?)";
 
-            con.setAutoCommit(false);
-
-            String sql =
-                    "INSERT INTO users(name,email,phone,password,role) " +
-                    "VALUES(?,?,?,?,?)";
-
-            PreparedStatement ps =
-                    con.prepareStatement(
-                            sql,
-                            Statement.RETURN_GENERATED_KEYS);
+            PreparedStatement ps = con.prepareStatement(sql);
 
             ps.setString(1, name);
-            ps.setString(2, email);
-            ps.setString(3, phone);
-            ps.setString(4, password);
-            ps.setString(5, "VICTIM");
+            ps.setString(2, phone);
+            ps.setString(3, "Registered");
 
             ps.executeUpdate();
 
-            ResultSet rs = ps.getGeneratedKeys();
+            System.out.println("Victim Registered Successfully!");
 
-            int userId = 0;
-
-            if (rs.next()) {
-                userId = rs.getInt(1);
-            }
-
-            PreparedStatement ps2 =
-                    con.prepareStatement(
-                            "INSERT INTO victim(user_id) VALUES(?)");
-
-            ps2.setInt(1, userId);
-            ps2.executeUpdate();
-
-            con.commit();
-
-            System.out.println("Victim registered successfully.");
-            System.out.println("Victim ID = " + userId);
+            con.close();
 
         } catch (Exception e) {
-
-            System.out.println("Registration failed: "
-                    + e.getMessage());
+            System.out.println(e);
         }
     }
 
+// 2. Create SOS
     static void createSOS() {
 
-        try (Connection con = Database.getConnection()) {
+        try {
+
+            Connection con = DBConnection.getConnection();
 
             System.out.print("Victim ID: ");
-            int victimId = sc.nextInt();
-
-            System.out.print("Disaster ID: ");
-            int disasterId = sc.nextInt();
+            int id = sc.nextInt();
             sc.nextLine();
 
             System.out.print("Location: ");
@@ -130,155 +100,139 @@ public class Victim {
 
             System.out.print("Emergency Type: ");
             String type = sc.nextLine();
+ 
+            System.out.print("Severity (1-4): ");
+            int severity = sc.nextInt();
+   
+            String sql = "UPDATE VICTIM SET location=?, emergency_type=?, severity=?, status=? WHERE victim_id=?";
 
-            System.out.print("Priority (1-5): ");
-            int priority = sc.nextInt();
+            PreparedStatement ps = con.prepareStatement(sql);
 
-            if (priority < 1 || priority > 5) {
-                System.out.println("Priority must be 1-5.");
-                return;
-            }
+            ps.setString(1, location);
+            ps.setString(2, type);
+            ps.setInt(3, severity);
+            ps.setString(4, "SOS Pending");
+            ps.setInt(5, id);
 
-            String sql =
-                    "INSERT INTO rescue_request " +
-                    "(victim_id,disaster_id,location," +
-                    "emergency_type,priority) " +
-                    "VALUES(?,?,?,?,?)";
+            int rows = ps.executeUpdate();
 
-            PreparedStatement ps =
-                    con.prepareStatement(sql);
+            if (rows > 0) {
+                System.out.println("\nSOS Created Successfully!");
+                System.out.println("Status : SOS Pending");
+            } else {
+            System.out.println("Invalid Victim ID!");
+        }
 
-            ps.setInt(1, victimId);
-            ps.setInt(2, disasterId);
-            ps.setString(3, location);
-            ps.setString(4, type);
-            ps.setInt(5, priority);
-
-            ps.executeUpdate();
-
-            System.out.println("SOS created successfully.");
+            con.close();
 
         } catch (Exception e) {
-
-            System.out.println("Error: " + e.getMessage());
-        }
+        System.out.println("Error: " + e.getMessage());
     }
-
+}
+    // 3. Track Request
     static void trackRequest() {
 
-        try (Connection con = Database.getConnection()) {
+        try {
+
+            Connection con = DBConnection.getConnection();
 
             System.out.print("Victim ID: ");
             int id = sc.nextInt();
 
-            String sql =
-                    "SELECT request_id,location," +
-                    "emergency_type,priority,status " +
-                    "FROM rescue_request " +
-                    "WHERE victim_id=?";
+            String sql = "SELECT * FROM VICTIM WHERE victim_id=?";
 
-            PreparedStatement ps =
-                    con.prepareStatement(sql);
+            PreparedStatement ps = con.prepareStatement(sql);
 
             ps.setInt(1, id);
 
             ResultSet rs = ps.executeQuery();
 
-            while (rs.next()) {
+            if (rs.next()) {
 
-                System.out.println(
-                        "Request ID: " +
-                        rs.getInt("request_id"));
+                System.out.println("\n----- REQUEST STATUS -----");
+                System.out.println("Victim ID      : " + rs.getInt("victim_id"));
+                System.out.println("Name           : " + rs.getString("name"));
+                System.out.println("Location       : " + rs.getString("location"));
+                System.out.println("Emergency Type : " + rs.getString("emergency_type"));
+                System.out.println("Status         : " + rs.getString("status"));
 
-                System.out.println(
-                        "Location: " +
-                        rs.getString("location"));
+            } else {
 
-                System.out.println(
-                        "Emergency: " +
-                        rs.getString("emergency_type"));
-
-                System.out.println(
-                        "Priority: " +
-                        rs.getInt("priority"));
-
-                System.out.println(
-                        "Status: " +
-                        rs.getString("status"));
-
-                System.out.println("-------------------");
+                System.out.println("Victim Not Found");
             }
 
-        } catch (Exception e) {
+            con.close();
 
-            System.out.println("Error: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println(e);
         }
     }
 
+    // 4. Find Shelters
     static void findShelters() {
 
-        try (Connection con = Database.getConnection()) {
+        try {
 
-            String sql =
-                    "SELECT * FROM shelter " +
-                    "WHERE occupied < capacity";
+            Connection con = DBConnection.getConnection();
+
+            String sql = "SELECT * FROM SHELTER_MANAGER WHERE available_beds>0";
 
             Statement st = con.createStatement();
 
             ResultSet rs = st.executeQuery(sql);
 
+            System.out.println("\n----- AVAILABLE SHELTERS -----");
+
             while (rs.next()) {
 
-                System.out.println(
-                        rs.getInt("shelter_id")
-                        + " | "
-                        + rs.getString("name")
-                        + " | "
-                        + rs.getString("location")
-                        + " | Available: "
-                        + (rs.getInt("capacity")
-                        - rs.getInt("occupied")));
+                System.out.println("Shelter ID : " + rs.getInt("shelter_id"));
+                System.out.println("Name       : " + rs.getString("shelter_name"));
+                System.out.println("Address    : " + rs.getString("address"));
+                System.out.println("Beds       : " + rs.getInt("available_beds"));
+                System.out.println("----------------------------");
             }
 
-        } catch (Exception e) {
+            con.close();
 
-            System.out.println("Error: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println(e);
         }
     }
 
-    static void requestResource() {
+    // 5. Request Resource
+static void requestResource() {
 
-        try (Connection con = Database.getConnection()) {
+    try {
 
-            System.out.print("Request ID: ");
-            int requestId = sc.nextInt();
+        Connection con = DBConnection.getConnection();
 
-            System.out.print("Resource ID: ");
-            int resourceId = sc.nextInt();
+        System.out.print("Victim ID: ");
+        int id = sc.nextInt();
+        sc.nextLine();
 
-            System.out.print("Quantity: ");
-            int quantity = sc.nextInt();
+        System.out.print("Resource Needed: ");
+        String resource = sc.nextLine();
 
-            String sql =
-                    "INSERT INTO resource_allocation" +
-                    "(resource_id,request_id,quantity) " +
-                    "VALUES(?,?,?)";
+        String sql = "UPDATE VICTIM SET resource_request=?, resource_status=? WHERE victim_id=?";
 
-            PreparedStatement ps =
-                    con.prepareStatement(sql);
+        PreparedStatement ps = con.prepareStatement(sql);
 
-            ps.setInt(1, resourceId);
-            ps.setInt(2, requestId);
-            ps.setInt(3, quantity);
+        ps.setString(1, resource);
+        ps.setString(2, "Resource Requested");
+        ps.setInt(3, id);
 
-            ps.executeUpdate();
+        int rows = ps.executeUpdate();
 
-            System.out.println(
-                    "Resource request submitted.");
+        if (rows > 0)
+            System.out.println("Resource Request Sent Successfully!");
+        else
+            System.out.println("Invalid Victim ID!");
 
-        } catch (Exception e) {
+        con.close();
 
-            System.out.println("Error: " + e.getMessage());
-        }
+    } catch (Exception e) {
+        System.out.println(e);
     }
 }
+
+}   

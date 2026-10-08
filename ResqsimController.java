@@ -5,6 +5,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+
+/* ============================================================
+   RESQSIM CONTROLLER
+   Disaster Response & Resource Management System
+   ============================================================ */
 
 @RestController
 @RequestMapping("/api")
@@ -17,9 +26,10 @@ public class ResqsimController {
         this.db = db;
     }
 
-    // =====================================================
-    // HEALTH
-    // =====================================================
+
+    /* =========================================================
+       HEALTH CHECK
+       ========================================================= */
 
     @GetMapping("/health")
     public Map<String, Object> health() {
@@ -32,891 +42,230 @@ public class ResqsimController {
             );
 
             return Map.of(
-                    "ok", true,
+                    "success", true,
                     "database", "connected"
             );
 
         } catch (Exception e) {
 
             return Map.of(
-                    "ok", false,
-                    "database", "error",
+                    "success", false,
+                    "database", "disconnected",
                     "message", e.getMessage()
             );
         }
     }
 
 
-    // =====================================================
-    // LOGIN
-    // =====================================================
+    /* =========================================================
+       LOGIN
+       ========================================================= */
 
     @PostMapping("/login")
     public ResponseEntity<?> login(
             @RequestBody Map<String, Object> b) {
 
         String role = s(b, "role");
-        String email = s(b, "email");
-        String password = s(b, "password");
-        String phone = s(b, "phone");
 
-        // ADMIN LOGIN
+        /* -----------------------------------------------------
+           ADMIN LOGIN
+           ----------------------------------------------------- */
+
         if ("admin".equalsIgnoreCase(role)) {
 
-            List<Map<String, Object>> rows =
-                    db.queryForList(
-                            "SELECT admin_id,name,email,phone " +
-                            "FROM ADMIN " +
-                            "WHERE email=? AND password=?",
-                            email,
-                            password
-                    );
+            String email = s(b, "email");
+            String password = s(b, "password");
 
-            if (rows.isEmpty()) {
+            try {
+
+                List<Map<String, Object>> rows =
+                        db.queryForList(
+                                "SELECT * FROM ADMIN " +
+                                "WHERE email=? AND password=?",
+                                email,
+                                password
+                        );
+
+                if (rows.isEmpty()) {
+
+                    return ResponseEntity
+                            .status(401)
+                            .body(Map.of(
+                                    "success", false,
+                                    "message",
+                                    "Invalid admin credentials"
+                            ));
+                }
+
+                Map<String, Object> admin = rows.get(0);
+
+                return ResponseEntity.ok(
+                        Map.of(
+                                "success", true,
+                                "role", "admin",
+                                "user", admin
+                        )
+                );
+
+            } catch (Exception e) {
 
                 return ResponseEntity
-                        .status(401)
-                        .body(
-                                Map.of(
-                                        "success", false,
-                                        "message",
-                                        "Invalid admin email or password"
-                                )
-                        );
+                        .internalServerError()
+                        .body(Map.of(
+                                "success", false,
+                                "message", e.getMessage()
+                        ));
             }
-
-            var user = rows.get(0);
-
-            return ResponseEntity.ok(
-                    Map.of(
-                            "success", true,
-                            "role", "admin",
-                            "user", user
-                    )
-            );
         }
 
 
-        // VICTIM LOGIN
+        /* -----------------------------------------------------
+           VICTIM LOGIN
+           ----------------------------------------------------- */
+
         if ("victim".equalsIgnoreCase(role)) {
 
-            List<Map<String, Object>> rows =
-                    db.queryForList(
-                            "SELECT victim_id,name,phone,location," +
-                            "emergency_type,severity,status,team_id," +
-                            "shelter_id,resource_request,resource_status " +
-                            "FROM VICTIM " +
-                            "WHERE victim_id=? AND phone=?",
-                            i(b, "victimId"),
-                            phone
-                    );
+            int victimId = i(b, "victimId");
+            String phone = s(b, "phone");
 
-            if (rows.isEmpty()) {
+            try {
+
+                List<Map<String, Object>> rows =
+                        db.queryForList(
+                                "SELECT * FROM VICTIM " +
+                                "WHERE victim_id=? AND phone=?",
+                                victimId,
+                                phone
+                        );
+
+                if (rows.isEmpty()) {
+
+                    return ResponseEntity
+                            .status(401)
+                            .body(Map.of(
+                                    "success", false,
+                                    "message",
+                                    "Invalid victim credentials"
+                            ));
+                }
+
+                Map<String, Object> victim = rows.get(0);
+
+                return ResponseEntity.ok(
+                        Map.of(
+                                "success", true,
+                                "role", "victim",
+                                "user", victim
+                        )
+                );
+
+            } catch (Exception e) {
 
                 return ResponseEntity
-                        .status(401)
-                        .body(
-                                Map.of(
-                                        "success", false,
-                                        "message",
-                                        "Invalid Victim ID or phone number"
-                                )
-                        );
+                        .internalServerError()
+                        .body(Map.of(
+                                "success", false,
+                                "message", e.getMessage()
+                        ));
             }
-
-            return ResponseEntity.ok(
-                    Map.of(
-                            "success", true,
-                            "role", "victim",
-                            "user", rows.get(0)
-                    )
-            );
         }
 
 
         return ResponseEntity
                 .badRequest()
-                .body(
-                        Map.of(
-                                "success", false,
-                                "message", "Unknown role"
-                        )
-                );
+                .body(Map.of(
+                        "success", false,
+                        "message", "Invalid role"
+                ));
     }
 
 
-    // =====================================================
-    // DASHBOARD
-    // =====================================================
+    /* =========================================================
+       DASHBOARD
+       ========================================================= */
 
     @GetMapping("/dashboard")
     public Map<String, Object> dashboard() {
 
+        int victims =
+                count(
+                        "SELECT COUNT(*) FROM VICTIM"
+                );
+
+        int pendingSOS =
+                count(
+                        "SELECT COUNT(*) FROM VICTIM " +
+                        "WHERE status='SOS Pending'"
+                );
+
+        int activeTeams =
+                count(
+                        "SELECT COUNT(*) FROM RESCUE_TEAM " +
+                        "WHERE rescue_status='Assigned'"
+                );
+
+        int availableTeams =
+                count(
+                        "SELECT COUNT(*) FROM RESCUE_TEAM " +
+                        "WHERE rescue_status='Available'"
+                );
+
+        int volunteers =
+                count(
+                        "SELECT COUNT(*) FROM VOLUNTEER"
+                );
+
+        int shelterBeds = 0;
+
+        try {
+
+            shelterBeds =
+                    count(
+                            "SELECT COALESCE(" +
+                            "SUM(available_beds),0) " +
+                            "FROM SHELTER_MANAGER"
+                    );
+
+        } catch (Exception ignored) {
+        }
+
         return Map.of(
-
-                "victims",
-                count("VICTIM"),
-
-                "pendingSos",
-                count(
-                        "VICTIM",
-                        "status='SOS Pending'"
-                ),
-
-                "activeTeams",
-                count(
-                        "RESCUE_TEAM",
-                        "rescue_status='Assigned'"
-                ),
-
-                "availableTeams",
-                count(
-                        "RESCUE_TEAM",
-                        "rescue_status='Available'"
-                ),
-
-                "availableBeds",
-                number(
-                        "SELECT COALESCE(" +
-                        "SUM(available_beds),0) " +
-                        "FROM SHELTER_MANAGER"
-                ),
-
-                "volunteers",
-                count("VOLUNTEER")
+                "victims", victims,
+                "pendingSOS", pendingSOS,
+                "activeTeams", activeTeams,
+                "availableTeams", availableTeams,
+                "volunteers", volunteers,
+                "shelterBeds", shelterBeds
         );
     }
 
 
-    // =====================================================
-    // VICTIMS
-    // =====================================================
+    /* =========================================================
+       GET ALL VICTIMS
+       ========================================================= */
 
     @GetMapping("/victims")
-    public List<Map<String, Object>> victims() {
+    public List<Map<String, Object>> getVictims() {
 
-        return db.queryForList(
+        try {
 
-                "SELECT v.*, " +
-                "t.team_name " +
-                "FROM VICTIM v " +
-                "LEFT JOIN RESCUE_TEAM t " +
-                "ON v.team_id=t.team_id " +
-                "ORDER BY v.victim_id DESC"
-        );
-    }
-
-
-    @PostMapping("/victims")
-    public Map<String, Object> registerVictim(
-            @RequestBody Map<String, Object> b) {
-
-        db.update(
-                "INSERT INTO VICTIM(name,phone,status) " +
-                "VALUES(?,?,?)",
-
-                s(b, "name"),
-                s(b, "phone"),
-                "Registered"
-        );
-
-        return Map.of(
-                "message",
-                "Victim registered successfully",
-
-                "victimId",
-                number(
-                        "SELECT LAST_INSERT_ID()"
-                )
-        );
-    }
-
-
-    // =====================================================
-    // CREATE SOS
-    // =====================================================
-
-    @PutMapping("/victims/{id}/sos")
-    public Map<String, Object> sos(
-            @PathVariable int id,
-            @RequestBody Map<String, Object> b) {
-
-        int n = db.update(
-
-                "UPDATE VICTIM SET " +
-                "location=?, " +
-                "emergency_type=?, " +
-                "severity=?, " +
-                "status='SOS Pending' " +
-                "WHERE victim_id=?",
-
-                s(b, "location"),
-                s(b, "emergencyType"),
-                i(b, "severity"),
-                id
-        );
-
-        return result(
-                n,
-                "SOS created successfully"
-        );
-    }
-
-
-    // =====================================================
-    // SINGLE VICTIM
-    // =====================================================
-
-    @GetMapping("/victims/{id}")
-    public ResponseEntity<?> victim(
-            @PathVariable int id) {
-
-        List<Map<String, Object>> rows =
-                db.queryForList(
-                        "SELECT * FROM VICTIM " +
-                        "WHERE victim_id=?",
-                        id
-                );
-
-        return rows.isEmpty()
-                ? ResponseEntity.notFound().build()
-                : ResponseEntity.ok(rows.get(0));
-    }
-
-
-    // =====================================================
-    // RESOURCE REQUEST
-    // =====================================================
-
-    @PutMapping("/victims/{id}/resource")
-    public Map<String, Object> resource(
-            @PathVariable int id,
-            @RequestBody Map<String, Object> b) {
-
-        String resource =
-                s(b, "resource");
-
-        int quantity =
-                i(b, "quantity");
-
-
-        // Check victim exists
-        List<Map<String, Object>> victim =
-                db.queryForList(
-                        "SELECT victim_id " +
-                        "FROM VICTIM " +
-                        "WHERE victim_id=?",
-                        id
-                );
-
-        if (victim.isEmpty()) {
-
-            throw new RuntimeException(
-                    "Victim not found"
+            return db.queryForList(
+                    "SELECT " +
+                    "v.victim_id, " +
+                    "v.name, " +
+                    "v.phone, " +
+                    "v.location, " +
+                    "v.emergency_type, " +
+                    "v.severity, " +
+                    "v.status, " +
+                    "v.admin_id, " +
+                    "v.team_id, " +
+                    "rt.team_name " +
+                    "FROM VICTIM v " +
+                    "LEFT JOIN RESCUE_TEAM rt " +
+                    "ON v.team_id=rt.team_id " +
+                    "ORDER BY v.victim_id DESC"
             );
-        }
-
-
-        // Check inventory
-        List<Map<String, Object>> inventory =
-                db.queryForList(
-
-                        "SELECT resource_id," +
-                        "resource_name," +
-                        "remaining_quantity " +
-
-                        "FROM RESOURCE_INVENTORY " +
-
-                        "WHERE resource_name=?",
-
-                        resource
-                );
-
-
-        if (inventory.isEmpty()) {
-
-            throw new RuntimeException(
-                    "Resource not found in inventory"
-            );
-        }
-
-
-        int remaining =
-                ((Number)
-                        inventory.get(0)
-                                .get("remaining_quantity"))
-                        .intValue();
-
-
-        if (quantity <= 0) {
-
-            throw new RuntimeException(
-                    "Quantity must be greater than zero"
-            );
-        }
-
-
-        if (quantity > remaining) {
-
-            throw new RuntimeException(
-                    "Only " +
-                    remaining +
-                    " units are available"
-            );
-        }
-
-
-        String request =
-                resource +
-                ":" +
-                quantity;
-
-
-        int n = db.update(
-
-                "UPDATE VICTIM SET " +
-                "resource_request=?, " +
-                "resource_status='Resource Requested' " +
-                "WHERE victim_id=?",
-
-                request,
-                id
-        );
-
-
-        return result(
-                n,
-                "Resource request sent"
-        );
-    }
-
-
-    // =====================================================
-    // FULL VICTIM DETAILS
-    // =====================================================
-
-    @GetMapping("/victim/{id}/full")
-    public ResponseEntity<?> victimFull(
-            @PathVariable int id) {
-
-        List<Map<String, Object>> rows =
-                db.queryForList(
-
-                        "SELECT " +
-                        "v.*, " +
-
-                        "t.team_name, " +
-                        "t.leader, " +
-                        "t.vehicle, " +
-
-                        "s.shelter_name, " +
-                        "s.address, " +
-                        "s.available_beds " +
-
-                        "FROM VICTIM v " +
-
-                        "LEFT JOIN RESCUE_TEAM t " +
-                        "ON v.team_id=t.team_id " +
-
-                        "LEFT JOIN SHELTER_MANAGER s " +
-                        "ON v.shelter_id=s.shelter_id " +
-
-                        "WHERE v.victim_id=?",
-
-                        id
-                );
-
-        return rows.isEmpty()
-                ? ResponseEntity.notFound().build()
-                : ResponseEntity.ok(rows.get(0));
-    }
-
-
-    // =====================================================
-    // SHELTERS
-    // =====================================================
-
-    @GetMapping("/shelters")
-    public List<Map<String, Object>> shelters() {
-
-        return db.queryForList(
-
-                "SELECT * " +
-                "FROM SHELTER_MANAGER " +
-                "WHERE available_beds>0 " +
-                "ORDER BY available_beds DESC"
-        );
-    }
-
-
-    // =====================================================
-    // ADMIN SOS
-    // =====================================================
-
-    @GetMapping("/admin/sos")
-    public List<Map<String, Object>> sosList() {
-
-        return db.queryForList(
-
-                "SELECT " +
-                "victim_id, " +
-                "name, " +
-                "phone, " +
-                "location, " +
-                "emergency_type, " +
-                "severity, " +
-                "status, " +
-                "team_id " +
-
-                "FROM VICTIM " +
-
-                "WHERE status='SOS Pending' " +
-
-                "ORDER BY severity DESC, victim_id ASC"
-        );
-    }
-
-
-    // =====================================================
-    // ADMIN RESOURCE REQUESTS
-    // =====================================================
-
-    @GetMapping("/admin/resources")
-    public List<Map<String, Object>> resourceRequests() {
-
-        return db.queryForList(
-
-                "SELECT " +
-                "victim_id, " +
-                "name, " +
-                "resource_request, " +
-                "resource_status " +
-
-                "FROM VICTIM " +
-
-                "WHERE resource_status=" +
-                "'Resource Requested'"
-        );
-    }
-
-
-    // =====================================================
-    // RESOURCE INVENTORY
-    // =====================================================
-
-    @GetMapping("/resources/inventory")
-    public List<Map<String, Object>> inventory() {
-
-        return db.queryForList(
-
-                "SELECT " +
-                "resource_id, " +
-                "resource_name, " +
-                "total_quantity, " +
-                "allocated_quantity, " +
-                "remaining_quantity " +
-
-                "FROM RESOURCE_INVENTORY " +
-
-                "ORDER BY resource_name"
-        );
-    }
-
-
-    // =====================================================
-    // AVAILABLE INVENTORY FOR DROPDOWNS
-    // =====================================================
-
-    @GetMapping("/resources/inventory/available")
-    public List<Map<String, Object>>
-    availableResourceInventory() {
-
-        return db.queryForList(
-
-                "SELECT " +
-                "resource_id, " +
-                "resource_name, " +
-                "remaining_quantity " +
-
-                "FROM RESOURCE_INVENTORY " +
-
-                "WHERE remaining_quantity > 0 " +
-
-                "ORDER BY resource_name"
-        );
-    }
-
-
-    // =====================================================
-    // ADD NEW INVENTORY RESOURCE
-    // =====================================================
-
-    @PostMapping("/admin/resources/inventory")
-    public Map<String, Object> addInventoryResource(
-            @RequestBody Map<String, Object> b) {
-
-        String name =
-                s(b, "resourceName");
-
-        int quantity =
-                i(b, "quantity");
-
-
-        if (name.isBlank()) {
-
-            throw new RuntimeException(
-                    "Resource name is required"
-            );
-        }
-
-
-        if (quantity <= 0) {
-
-            throw new RuntimeException(
-                    "Quantity must be greater than zero"
-            );
-        }
-
-
-        int n = db.update(
-
-                "INSERT INTO RESOURCE_INVENTORY " +
-                "(resource_name,total_quantity," +
-                "allocated_quantity,remaining_quantity) " +
-
-                "VALUES(?,?,0,?)",
-
-                name,
-                quantity,
-                quantity
-        );
-
-
-        return result(
-                n,
-                "Resource added successfully"
-        );
-    }
-
-
-    // =====================================================
-    // ADD STOCK
-    // =====================================================
-
-    @PutMapping(
-            "/admin/resources/inventory/{id}/add-stock"
-    )
-    public Map<String, Object> addStock(
-            @PathVariable int id,
-            @RequestBody Map<String, Object> b) {
-
-        int quantity =
-                i(b, "quantity");
-
-
-        if (quantity <= 0) {
-
-            throw new RuntimeException(
-                    "Quantity must be greater than zero"
-            );
-        }
-
-
-        int n = db.update(
-
-                "UPDATE RESOURCE_INVENTORY " +
-
-                "SET total_quantity = " +
-                "total_quantity + ?, " +
-
-                "remaining_quantity = " +
-                "remaining_quantity + ? " +
-
-                "WHERE resource_id=?",
-
-                quantity,
-                quantity,
-                id
-        );
-
-
-        return result(
-                n,
-                "Stock added successfully"
-        );
-    }
-
-
-    // =====================================================
-    // ALLOCATE RESOURCE
-    // =====================================================
-
-    @PutMapping("/admin/resources/{id}")
-    public Map<String, Object> allocate(
-            @PathVariable int id) {
-
-        try (
-                var con =
-                        db.getDataSource()
-                                .getConnection()
-        ) {
-
-            con.setAutoCommit(false);
-
-            try {
-
-                // -----------------------------------------
-                // Get victim/resource request
-                // -----------------------------------------
-
-                String resourceRequest;
-
-                try (
-                        var ps =
-                                con.prepareStatement(
-
-                                        "SELECT " +
-                                        "resource_request " +
-
-                                        "FROM VICTIM " +
-
-                                        "WHERE victim_id=? " +
-                                        "AND resource_status=" +
-                                        "'Resource Requested' " +
-
-                                        "FOR UPDATE"
-                                )
-                ) {
-
-                    ps.setInt(1, id);
-
-                    try (var rs =
-                                 ps.executeQuery()) {
-
-                        if (!rs.next()) {
-
-                            throw new RuntimeException(
-                                    "Resource request not found"
-                            );
-                        }
-
-                        resourceRequest =
-                                rs.getString(
-                                        "resource_request"
-                                );
-                    }
-                }
-
-
-                // -----------------------------------------
-                // Parse resource + quantity
-                // -----------------------------------------
-
-                String resourceName =
-                        resourceRequest.trim();
-
-                int quantity = 1;
-
-
-                if (resourceRequest.contains(":")) {
-
-                    String[] parts =
-                            resourceRequest
-                                    .split(":", 2);
-
-                    resourceName =
-                            parts[0].trim();
-
-                    quantity =
-                            Integer.parseInt(
-                                    parts[1].trim()
-                            );
-                }
-
-
-                if (quantity <= 0) {
-
-                    throw new RuntimeException(
-                            "Invalid resource quantity"
-                    );
-                }
-
-
-                // -----------------------------------------
-                // Lock inventory row
-                // -----------------------------------------
-
-                int resourceId;
-                int remaining;
-
-
-                try (
-                        var ps =
-                                con.prepareStatement(
-
-                                        "SELECT " +
-                                        "resource_id, " +
-                                        "remaining_quantity " +
-
-                                        "FROM RESOURCE_INVENTORY " +
-
-                                        "WHERE resource_name=? " +
-
-                                        "FOR UPDATE"
-                                )
-                ) {
-
-                    ps.setString(
-                            1,
-                            resourceName
-                    );
-
-                    try (var rs =
-                                 ps.executeQuery()) {
-
-                        if (!rs.next()) {
-
-                            throw new RuntimeException(
-                                    "Resource not found in inventory"
-                            );
-                        }
-
-                        resourceId =
-                                rs.getInt(
-                                        "resource_id"
-                                );
-
-                        remaining =
-                                rs.getInt(
-                                        "remaining_quantity"
-                                );
-                    }
-                }
-
-
-                // -----------------------------------------
-                // Check stock
-                // -----------------------------------------
-
-                if (quantity > remaining) {
-
-                    throw new RuntimeException(
-
-                            "Not enough stock. " +
-
-                            "Only " +
-                            remaining +
-                            " units of " +
-                            resourceName +
-                            " are available."
-                    );
-                }
-
-
-                // -----------------------------------------
-                // Deduct inventory
-                // -----------------------------------------
-
-                try (
-                        var ps =
-                                con.prepareStatement(
-
-                                        "UPDATE RESOURCE_INVENTORY " +
-
-                                        "SET allocated_quantity = " +
-                                        "allocated_quantity + ?, " +
-
-                                        "remaining_quantity = " +
-                                        "remaining_quantity - ? " +
-
-                                        "WHERE resource_id=? " +
-
-                                        "AND remaining_quantity>=?"
-                                )
-                ) {
-
-                    ps.setInt(
-                            1,
-                            quantity
-                    );
-
-                    ps.setInt(
-                            2,
-                            quantity
-                    );
-
-                    ps.setInt(
-                            3,
-                            resourceId
-                    );
-
-                    ps.setInt(
-                            4,
-                            quantity
-                    );
-
-
-                    if (ps.executeUpdate() == 0) {
-
-                        throw new RuntimeException(
-                                "Resource allocation failed"
-                        );
-                    }
-                }
-
-
-                // -----------------------------------------
-                // Update victim
-                // -----------------------------------------
-
-                try (
-                        var ps =
-                                con.prepareStatement(
-
-                                        "UPDATE VICTIM " +
-
-                                        "SET resource_status=" +
-                                        "'Resources Allocated' " +
-
-                                        "WHERE victim_id=?"
-                                )
-                ) {
-
-                    ps.setInt(1, id);
-
-                    if (ps.executeUpdate() == 0) {
-
-                        throw new RuntimeException(
-                                "Victim not found"
-                        );
-                    }
-                }
-
-
-                con.commit();
-
-
-                return Map.of(
-
-                        "success",
-                        true,
-
-                        "message",
-                        "Resources allocated successfully",
-
-                        "resource",
-                        resourceName,
-
-                        "quantity",
-                        quantity
-                );
-
-            } catch (Exception e) {
-
-                con.rollback();
-
-                throw e;
-            }
 
         } catch (Exception e) {
 
@@ -927,320 +276,938 @@ public class ResqsimController {
     }
 
 
-    // =====================================================
-    // RESCUE TEAMS
-    // IMPORTANT:
-    // team_id + victim_id are both returned
-    // =====================================================
+    /* =========================================================
+       REGISTER VICTIM
+       ========================================================= */
 
-    @GetMapping("/teams")
-    public List<Map<String, Object>> teams() {
+    @PostMapping("/victims")
+    public Map<String, Object> registerVictim(
+            @RequestBody Map<String, Object> b) {
 
-        return db.queryForList(
+        try {
 
-                "SELECT " +
+            String name = s(b, "name");
+            String phone = s(b, "phone");
+            String location = s(b, "location");
+            String emergencyType = s(b, "emergencyType");
 
-                "rt.team_id, " +
-                "rt.team_name, " +
-                "rt.leader, " +
-                "rt.vehicle, " +
-                "rt.rescue_status, " +
-                "rt.victim_id, " +
+            int severity = i(b, "severity");
 
-                "v.name AS victim_name " +
+            int updated =
+                    db.update(
+                            "INSERT INTO VICTIM " +
+                            "(name, phone, location, " +
+                            "emergency_type, severity, status) " +
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            name,
+                            phone,
+                            location,
+                            emergencyType,
+                            severity,
+                            "Registered"
+                    );
 
-                "FROM RESCUE_TEAM rt " +
+            return Map.of(
+                    "success", true,
+                    "updated", updated,
+                    "message",
+                    "Victim registered successfully"
+            );
 
-                "LEFT JOIN VICTIM v " +
-                "ON rt.victim_id=v.victim_id " +
+        } catch (Exception e) {
 
-                "ORDER BY rt.team_id"
+            throw new RuntimeException(
+                    e.getMessage()
+            );
+        }
+    }
+
+
+    /* =========================================================
+       GET SINGLE VICTIM
+       ========================================================= */
+
+    @GetMapping("/victims/{id}")
+    public ResponseEntity<?> getVictim(
+            @PathVariable int id) {
+
+        try {
+
+            List<Map<String, Object>> rows =
+                    db.queryForList(
+                            "SELECT * FROM VICTIM " +
+                            "WHERE victim_id=?",
+                            id
+                    );
+
+            if (rows.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok(rows.get(0));
+
+        } catch (Exception e) {
+
+            return ResponseEntity
+                    .internalServerError()
+                    .body(Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    ));
+        }
+    }
+
+
+    /* =========================================================
+       COMPLETE VICTIM INFORMATION
+       ========================================================= */
+
+    @GetMapping("/victim/{id}/full")
+    public ResponseEntity<?> fullVictim(
+            @PathVariable int id) {
+
+        try {
+
+            List<Map<String, Object>> rows =
+                    db.queryForList(
+                            "SELECT " +
+                            "v.*, " +
+                            "rt.team_name, " +
+                            "rt.leader AS team_leader, " +
+                            "rt.vehicle, " +
+                            "rt.rescue_status, " +
+                            "sm.shelter_name, " +
+                            "sm.address AS shelter_address " +
+                            "FROM VICTIM v " +
+                            "LEFT JOIN RESCUE_TEAM rt " +
+                            "ON v.team_id=rt.team_id " +
+                            "LEFT JOIN SHELTER_MANAGER sm " +
+                            "ON v.shelter_id=sm.shelter_id " +
+                            "WHERE v.victim_id=?",
+                            id
+                    );
+
+            if (rows.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok(rows.get(0));
+
+        } catch (Exception e) {
+
+            return ResponseEntity
+                    .internalServerError()
+                    .body(Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    ));
+        }
+    }
+
+
+    /* =========================================================
+       CREATE SOS
+       POST VERSION
+       ========================================================= */
+
+    @PostMapping("/victims/sos")
+    public Map<String, Object> createSos(
+            @RequestBody Map<String, Object> b) {
+
+        int victimId = i(b, "victimId");
+        String location = s(b, "location");
+        String emergencyType = s(b, "emergencyType");
+        int severity = i(b, "severity");
+
+        int updated =
+                db.update(
+                        "UPDATE VICTIM SET " +
+                        "location=?, " +
+                        "emergency_type=?, " +
+                        "severity=?, " +
+                        "status='SOS Pending' " +
+                        "WHERE victim_id=?",
+                        location,
+                        emergencyType,
+                        severity,
+                        victimId
+                );
+
+        return result(
+                updated,
+                "SOS request created successfully"
         );
     }
 
 
-    // =====================================================
-    // AVAILABLE RESCUE TEAMS
-    // =====================================================
+    /* =========================================================
+       CREATE SOS
+       PUT VERSION
+       ========================================================= */
 
-    @GetMapping("/teams/available")
-    public List<Map<String, Object>>
-    availableTeams() {
+    @PutMapping("/victims/{id}/sos")
+    public Map<String, Object> createSosPut(
+            @PathVariable int id,
+            @RequestBody Map<String, Object> b) {
 
-        return db.queryForList(
+        String location = s(b, "location");
+        String emergencyType = s(b, "emergencyType");
+        int severity = i(b, "severity");
 
-                "SELECT " +
-                "team_id, " +
-                "team_name, " +
-                "leader, " +
-                "vehicle, " +
-                "rescue_status, " +
-                "victim_id " +
+        int updated =
+                db.update(
+                        "UPDATE VICTIM SET " +
+                        "location=?, " +
+                        "emergency_type=?, " +
+                        "severity=?, " +
+                        "status='SOS Pending' " +
+                        "WHERE victim_id=?",
+                        location,
+                        emergencyType,
+                        severity,
+                        id
+                );
 
-                "FROM RESCUE_TEAM " +
-
-                "WHERE rescue_status='Available' " +
-
-                "ORDER BY team_id"
+        return result(
+                updated,
+                "SOS request created successfully"
         );
     }
 
 
-    // =====================================================
-    // REGISTER RESCUE TEAM
-    // =====================================================
+    /* =========================================================
+       REQUEST RESOURCE
+       ========================================================= */
+
+    @PutMapping("/victims/{id}/resource")
+    public Map<String, Object> requestResource(
+            @PathVariable int id,
+            @RequestBody Map<String, Object> b) {
+
+        String resource = s(b, "resource");
+
+        int quantity = i(b, "quantity");
+
+        if (quantity <= 0) {
+            quantity = 1;
+        }
+
+        String requestText =
+                resource + ": " + quantity;
+
+        int updated =
+                db.update(
+                        "UPDATE VICTIM SET " +
+                        "resource_request=?, " +
+                        "resource_status='Pending' " +
+                        "WHERE victim_id=?",
+                        requestText,
+                        id
+                );
+
+        return result(
+                updated,
+                "Resource request submitted"
+        );
+    }
+
+
+    /* =========================================================
+       ADMIN RESOURCES
+       
+       IMPORTANT:
+       Only PENDING resource requests are returned.
+       
+       Allocated requests will NOT appear here.
+       ========================================================= */
+
+    @GetMapping("/admin/resources")
+    public List<Map<String, Object>> adminResources() {
+
+        try {
+
+            return db.queryForList(
+                    "SELECT " +
+                    "victim_id, " +
+                    "name, " +
+                    "location, " +
+                    "resource_request, " +
+                    "resource_status " +
+                    "FROM VICTIM " +
+                    "WHERE resource_request IS NOT NULL " +
+                    "AND TRIM(resource_request) <> '' " +
+                    "AND resource_status='Pending' " +
+                    "ORDER BY victim_id DESC"
+            );
+
+        } catch (Exception e) {
+
+            throw new RuntimeException(
+                    e.getMessage()
+            );
+        }
+    }
+
+
+    /* =========================================================
+       TRACK VICTIM REQUEST
+       ========================================================= */
+
+    @GetMapping("/victims/{id}/track")
+    public ResponseEntity<?> trackVictim(
+            @PathVariable int id) {
+
+        try {
+
+            List<Map<String, Object>> rows =
+                    db.queryForList(
+                            "SELECT " +
+                            "victim_id, " +
+                            "name, " +
+                            "location, " +
+                            "status, " +
+                            "team_id, " +
+                            "resource_request, " +
+                            "resource_status " +
+                            "FROM VICTIM " +
+                            "WHERE victim_id=?",
+                            id
+                    );
+
+            if (rows.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            return ResponseEntity.ok(rows.get(0));
+
+        } catch (Exception e) {
+
+            return ResponseEntity
+                    .internalServerError()
+                    .body(Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    ));
+        }
+    }
+
+
+    /* =========================================================
+       SHELTERS
+       ========================================================= */
+
+    @GetMapping("/shelters")
+    public List<Map<String, Object>> shelters() {
+
+        return db.queryForList(
+                "SELECT * FROM SHELTER_MANAGER " +
+                "ORDER BY shelter_id"
+        );
+    }
+
+
+    /* =========================================================
+       ADMIN SOS QUEUE
+       ========================================================= */
+
+    @GetMapping("/admin/sos")
+    public List<Map<String, Object>> adminSos() {
+
+        return db.queryForList(
+                "SELECT " +
+                "v.victim_id, " +
+                "v.name, " +
+                "v.phone, " +
+                "v.location, " +
+                "v.emergency_type, " +
+                "v.severity, " +
+                "v.status, " +
+                "v.team_id, " +
+                "rt.team_name " +
+                "FROM VICTIM v " +
+                "LEFT JOIN RESCUE_TEAM rt " +
+                "ON v.team_id=rt.team_id " +
+                "WHERE v.status='SOS Pending' " +
+                "ORDER BY v.severity DESC, " +
+                "v.victim_id ASC"
+        );
+    }
+
+
+    /* =========================================================
+       RESOURCE REQUESTS
+       
+       IMPORTANT:
+       Only PENDING requests are returned.
+       
+       Allocated requests are excluded.
+       ========================================================= */
+
+    @GetMapping("/admin/resource-requests")
+    public List<Map<String, Object>> resourceRequests() {
+
+        return db.queryForList(
+                "SELECT " +
+                "victim_id, " +
+                "name, " +
+                "phone, " +
+                "location, " +
+                "emergency_type, " +
+                "severity, " +
+                "resource_request, " +
+                "resource_status " +
+                "FROM VICTIM " +
+                "WHERE resource_request IS NOT NULL " +
+                "AND TRIM(resource_request) <> '' " +
+                "AND resource_status='Pending' " +
+                "ORDER BY severity DESC, " +
+                "victim_id ASC"
+        );
+    }
+
+
+    /* =========================================================
+       RESOURCE INVENTORY
+       ========================================================= */
+
+    @GetMapping("/admin/inventory")
+    public List<Map<String, Object>> inventory() {
+
+        return db.queryForList(
+                "SELECT " +
+                "resource_id, " +
+                "resource_name, " +
+                "total_quantity, " +
+                "allocated_quantity, " +
+                "(total_quantity - " +
+                "COALESCE(allocated_quantity,0)) " +
+                "AS remaining_quantity " +
+                "FROM RESOURCE_INVENTORY " +
+                "ORDER BY resource_id"
+        );
+    }
+
+
+    /* =========================================================
+       ADD INVENTORY
+       ========================================================= */
+
+    @PostMapping("/admin/inventory")
+    public Map<String, Object> addInventory(
+            @RequestBody Map<String, Object> b) {
+
+        String resourceName = s(b, "resourceName");
+        int quantity = i(b, "quantity");
+
+        int updated =
+                db.update(
+                        "INSERT INTO RESOURCE_INVENTORY " +
+                        "(resource_name, total_quantity, " +
+                        "allocated_quantity) " +
+                        "VALUES (?, ?, 0)",
+                        resourceName,
+                        quantity
+                );
+
+        return result(
+                updated,
+                "Resource added to inventory"
+        );
+    }
+
+
+    /* =========================================================
+       ADD STOCK
+       ========================================================= */
+
+    @PutMapping("/admin/inventory/{id}/stock")
+    public Map<String, Object> addStock(
+            @PathVariable int id,
+            @RequestBody Map<String, Object> b) {
+
+        int quantity = i(b, "quantity");
+
+        int updated =
+                db.update(
+                        "UPDATE RESOURCE_INVENTORY " +
+                        "SET total_quantity=" +
+                        "total_quantity+? " +
+                        "WHERE resource_id=?",
+                        quantity,
+                        id
+                );
+
+        return result(
+                updated,
+                "Stock added successfully"
+        );
+    }
+
+
+    /* =========================================================
+       ALLOCATE RESOURCE
+       ========================================================= */
+
+    @PutMapping("/admin/resources/{id}")
+    public Map<String, Object> allocateResource(
+            @PathVariable int id) {
+
+        try {
+
+            List<Map<String, Object>> rows =
+                    db.queryForList(
+                            "SELECT resource_request " +
+                            "FROM VICTIM " +
+                            "WHERE victim_id=?",
+                            id
+                    );
+
+            if (rows.isEmpty()) {
+
+                return Map.of(
+                        "success", false,
+                        "message", "Victim not found"
+                );
+            }
+
+            String request =
+                    s(
+                            rows.get(0),
+                            "resource_request"
+                    );
+
+            if (request == null ||
+                request.isBlank()) {
+
+                return Map.of(
+                        "success", false,
+                        "message",
+                        "No resource request found"
+                );
+            }
+
+            String resourceName = request;
+            int quantity = 1;
+
+            if (request.contains(":")) {
+
+                String[] parts =
+                        request.split(":");
+
+                resourceName =
+                        parts[0].trim();
+
+                try {
+
+                    quantity =
+                            Integer.parseInt(
+                                    parts[1].trim()
+                            );
+
+                } catch (Exception ignored) {
+                }
+            }
+
+            List<Map<String, Object>> inv =
+                    db.queryForList(
+                            "SELECT " +
+                            "resource_id, " +
+                            "total_quantity, " +
+                            "allocated_quantity " +
+                            "FROM RESOURCE_INVENTORY " +
+                            "WHERE resource_name=? " +
+                            "FOR UPDATE",
+                            resourceName
+                    );
+
+            if (inv.isEmpty()) {
+
+                return Map.of(
+                        "success", false,
+                        "message",
+                        "Resource not found in inventory"
+                );
+            }
+
+            Map<String, Object> resource =
+                    inv.get(0);
+
+            int total =
+                    iNullable(
+                            resource,
+                            "total_quantity"
+                    );
+
+            int allocated =
+                    iNullable(
+                            resource,
+                            "allocated_quantity"
+                    );
+
+            int remaining =
+                    total - allocated;
+
+            if (remaining < quantity) {
+
+                return Map.of(
+                        "success", false,
+                        "message",
+                        "Insufficient resource stock"
+                );
+            }
+
+            int updatedInventory =
+                    db.update(
+                            "UPDATE RESOURCE_INVENTORY " +
+                            "SET allocated_quantity=" +
+                            "allocated_quantity+? " +
+                            "WHERE resource_id=?",
+                            quantity,
+                            resource.get(
+                                    "resource_id"
+                            )
+                    );
+
+            if (updatedInventory == 0) {
+
+                return Map.of(
+                        "success", false,
+                        "message",
+                        "Inventory update failed"
+                );
+            }
+
+            db.update(
+                    "UPDATE VICTIM SET " +
+                    "resource_status='Allocated' " +
+                    "WHERE victim_id=?",
+                    id
+            );
+
+            return Map.of(
+                    "success", true,
+                    "message",
+                    "Resource allocated successfully"
+            );
+
+        } catch (Exception e) {
+
+            throw new RuntimeException(
+                    e.getMessage()
+            );
+        }
+    }
+
+
+    /* =========================================================
+       RESCUE TEAM REGISTRATION
+       ========================================================= */
 
     @PostMapping("/admin/teams")
     public Map<String, Object> registerTeam(
             @RequestBody Map<String, Object> b) {
 
-        int teamId =
-                i(b, "teamId");
+        int teamId = i(b, "teamId");
+        String teamName = s(b, "teamName");
+        String leader = s(b, "leader");
+        String vehicle = s(b, "vehicle");
 
-        String teamName =
-                s(b, "teamName");
-
-        String leader =
-                s(b, "leader");
-
-        String vehicle =
-                s(b, "vehicle");
-
-
-        int n = db.update(
-
-                "INSERT INTO RESCUE_TEAM " +
-                "(team_id,team_name,leader,vehicle," +
-                "rescue_status,victim_id) " +
-
-                "VALUES(?,?,?,?,?,NULL)",
-
-                teamId,
-                teamName,
-                leader,
-                vehicle,
-                "Available"
-        );
-
+        int updated =
+                db.update(
+                        "INSERT INTO RESCUE_TEAM " +
+                        "(team_id, team_name, leader, " +
+                        "vehicle, rescue_status) " +
+                        "VALUES (?, ?, ?, ?, 'Available')",
+                        teamId,
+                        teamName,
+                        leader,
+                        vehicle
+                );
 
         return result(
-                n,
+                updated,
                 "Rescue team registered successfully"
         );
     }
 
 
-    // =====================================================
-    // ASSIGN RESCUE TEAM
-    //
-    // VICTIM.team_id = assigned team
-    // RESCUE_TEAM.victim_id = assigned victim
-    // =====================================================
+    /* =========================================================
+       GET ALL RESCUE TEAMS
+       ========================================================= */
 
-    @PutMapping("/admin/assign-team")
-    public Map<String, Object> assignTeam(
+    @GetMapping("/teams")
+    public List<Map<String, Object>> teams() {
+
+        return db.queryForList(
+                "SELECT * FROM RESCUE_TEAM " +
+                "ORDER BY team_id"
+        );
+    }
+
+
+    /* =========================================================
+       AVAILABLE TEAMS
+       ========================================================= */
+
+    @GetMapping("/teams/available")
+    public List<Map<String, Object>> availableTeams() {
+
+        return db.queryForList(
+                "SELECT * FROM RESCUE_TEAM " +
+                "WHERE rescue_status='Available' " +
+                "ORDER BY team_id"
+        );
+    }
+
+
+    /* =========================================================
+       RESCUE TEAM FEATURE 1
+
+       VIEW RESCUE REQUESTS
+
+       OS CONCEPT:
+       PRIORITY SCHEDULING
+
+       Higher severity = higher priority
+       ========================================================= */
+
+    @GetMapping("/teams/rescue-requests")
+    public List<Map<String, Object>> viewRescueRequests() {
+
+        return db.queryForList(
+                "SELECT " +
+                "v.victim_id, " +
+                "v.name, " +
+                "v.phone, " +
+                "v.location, " +
+                "v.emergency_type, " +
+                "v.severity, " +
+                "v.status, " +
+                "v.team_id " +
+                "FROM VICTIM v " +
+                "WHERE v.status='SOS Pending' " +
+                "ORDER BY v.severity DESC, " +
+                "v.victim_id ASC"
+        );
+    }
+
+
+    /* =========================================================
+       RESCUE TEAM FEATURE 2
+
+       ACCEPT RESCUE OPERATION
+
+       OS CONCEPT:
+       PROCESS SYNCHRONIZATION /
+       MUTUAL EXCLUSION
+
+       synchronized prevents concurrent access.
+       FOR UPDATE locks database rows.
+       Transaction provides atomic operation.
+       ========================================================= */
+
+    @PutMapping("/teams/accept")
+    public synchronized Map<String, Object>
+    acceptRescueOperation(
             @RequestBody Map<String, Object> b) {
 
-        int victimId =
-                i(b, "victimId");
+        int victimId = i(b, "victimId");
+        int teamId = i(b, "teamId");
 
-        int teamId =
-                i(b, "teamId");
+        try {
 
-
-        try (
-                var con =
-                        db.getDataSource()
-                                .getConnection()
-        ) {
-
-            con.setAutoCommit(false);
+            var con =
+                    db.getDataSource()
+                            .getConnection();
 
             try {
 
-                // -----------------------------------------
-                // Check victim
-                // -----------------------------------------
+                con.setAutoCommit(false);
+
+
+                /* -----------------------------------------
+                   LOCK VICTIM
+                   ----------------------------------------- */
 
                 try (
                         var ps =
                                 con.prepareStatement(
-
-                                        "SELECT victim_id " +
+                                        "SELECT " +
+                                        "victim_id, " +
+                                        "status, " +
+                                        "team_id " +
                                         "FROM VICTIM " +
                                         "WHERE victim_id=? " +
                                         "FOR UPDATE"
                                 )
                 ) {
 
-                    ps.setInt(
-                            1,
-                            victimId
-                    );
+                    ps.setInt(1, victimId);
 
-                    try (var rs =
-                                 ps.executeQuery()) {
+                    try (
+                            var rs =
+                                    ps.executeQuery()
+                    ) {
 
                         if (!rs.next()) {
 
-                            throw new RuntimeException(
+                            con.rollback();
+
+                            return Map.of(
+                                    "success", false,
+                                    "message",
                                     "Victim not found"
+                            );
+                        }
+
+                        String status =
+                                rs.getString(
+                                        "status"
+                                );
+
+                        int existingTeam =
+                                rs.getInt(
+                                        "team_id"
+                                );
+
+                        if (rs.wasNull()) {
+                            existingTeam = 0;
+                        }
+
+                        if (!"SOS Pending"
+                                .equalsIgnoreCase(
+                                        status
+                                )) {
+
+                            con.rollback();
+
+                            return Map.of(
+                                    "success", false,
+                                    "message",
+                                    "Victim is no longer pending"
+                            );
+                        }
+
+                        if (existingTeam != 0) {
+
+                            con.rollback();
+
+                            return Map.of(
+                                    "success", false,
+                                    "message",
+                                    "Victim already has a rescue team"
                             );
                         }
                     }
                 }
 
 
-                // -----------------------------------------
-                // Check rescue team
-                // -----------------------------------------
+                /* -----------------------------------------
+                   LOCK RESCUE TEAM
+                   ----------------------------------------- */
 
                 try (
                         var ps =
                                 con.prepareStatement(
-
-                                        "SELECT team_id " +
+                                        "SELECT " +
+                                        "team_id, " +
+                                        "rescue_status " +
                                         "FROM RESCUE_TEAM " +
                                         "WHERE team_id=? " +
                                         "FOR UPDATE"
                                 )
                 ) {
 
-                    ps.setInt(
-                            1,
-                            teamId
-                    );
+                    ps.setInt(1, teamId);
 
-                    try (var rs =
-                                 ps.executeQuery()) {
+                    try (
+                            var rs =
+                                    ps.executeQuery()
+                    ) {
 
                         if (!rs.next()) {
 
-                            throw new RuntimeException(
+                            con.rollback();
+
+                            return Map.of(
+                                    "success", false,
+                                    "message",
                                     "Rescue team not found"
+                            );
+                        }
+
+                        String status =
+                                rs.getString(
+                                        "rescue_status"
+                                );
+
+                        if (!"Available"
+                                .equalsIgnoreCase(
+                                        status
+                                )) {
+
+                            con.rollback();
+
+                            return Map.of(
+                                    "success", false,
+                                    "message",
+                                    "Rescue team is not available"
                             );
                         }
                     }
                 }
 
 
-                // -----------------------------------------
-                // Remove this team from any old victim
-                // -----------------------------------------
+                /* -----------------------------------------
+                   ASSIGN VICTIM
+                   ----------------------------------------- */
 
                 try (
                         var ps =
                                 con.prepareStatement(
-
-                                        "UPDATE VICTIM " +
-
-                                        "SET team_id=NULL " +
-
-                                        "WHERE team_id=? " +
-                                        "AND victim_id<>?"
+                                        "UPDATE VICTIM SET " +
+                                        "team_id=?, " +
+                                        "status='Approved' " +
+                                        "WHERE victim_id=?"
                                 )
                 ) {
 
-                    ps.setInt(
-                            1,
-                            teamId
-                    );
-
-                    ps.setInt(
-                            2,
-                            victimId
-                    );
+                    ps.setInt(1, teamId);
+                    ps.setInt(2, victimId);
 
                     ps.executeUpdate();
                 }
 
 
-                // -----------------------------------------
-                // Assign team to victim
-                // -----------------------------------------
+                /* -----------------------------------------
+                   ASSIGN TEAM
+                   ----------------------------------------- */
 
                 try (
                         var ps =
                                 con.prepareStatement(
-
-                                        "UPDATE VICTIM " +
-
-                                        "SET team_id=?, " +
-                                        "status='Approved' " +
-
-                                        "WHERE victim_id=?"
-                                )
-                ) {
-
-                    ps.setInt(
-                            1,
-                            teamId
-                    );
-
-                    ps.setInt(
-                            2,
-                            victimId
-                    );
-
-                    if (ps.executeUpdate() == 0) {
-
-                        throw new RuntimeException(
-                                "Victim not found"
-                        );
-                    }
-                }
-
-
-                // -----------------------------------------
-                // Assign victim to rescue team
-                // -----------------------------------------
-
-                try (
-                        var ps =
-                                con.prepareStatement(
-
-                                        "UPDATE RESCUE_TEAM " +
-
-                                        "SET victim_id=?, " +
+                                        "UPDATE RESCUE_TEAM SET " +
+                                        "victim_id=?, " +
                                         "rescue_status='Assigned' " +
-
                                         "WHERE team_id=?"
                                 )
                 ) {
 
-                    ps.setInt(
-                            1,
-                            victimId
-                    );
+                    ps.setInt(1, victimId);
+                    ps.setInt(2, teamId);
 
-                    ps.setInt(
-                            2,
-                            teamId
-                    );
-
-                    if (ps.executeUpdate() == 0) {
-
-                        throw new RuntimeException(
-                                "Team not found"
-                        );
-                    }
+                    ps.executeUpdate();
                 }
 
 
                 con.commit();
 
-
                 return Map.of(
-
-                        "success",
-                        true,
-
+                        "success", true,
                         "message",
-                        "Rescue team assigned successfully",
-
+                        "Rescue operation accepted",
                         "victimId",
                         victimId,
-
                         "teamId",
                         teamId
                 );
@@ -1250,6 +1217,10 @@ public class ResqsimController {
                 con.rollback();
 
                 throw e;
+
+            } finally {
+
+                con.close();
             }
 
         } catch (Exception e) {
@@ -1261,282 +1232,417 @@ public class ResqsimController {
     }
 
 
-    // =====================================================
-    // VOLUNTEERS
-    // =====================================================
+    /* =========================================================
+       RESCUE TEAM FEATURE 3
+
+       UPDATE RESCUE STATUS
+
+       OS CONCEPT:
+       MULTITHREADING
+
+       ExecutorService creates a worker thread.
+       ========================================================= */
+
+    @PutMapping("/teams/{teamId}/status")
+    public Map<String, Object>
+    updateRescueStatus(
+            @PathVariable int teamId,
+            @RequestBody Map<String, Object> b) {
+
+        String newStatus =
+                s(b, "status");
+
+        ExecutorService executor =
+                Executors.newSingleThreadExecutor();
+
+        try {
+
+            Future<Integer> future =
+                    executor.submit(
+                            () ->
+                                    db.update(
+                                            "UPDATE RESCUE_TEAM " +
+                                            "SET rescue_status=? " +
+                                            "WHERE team_id=?",
+                                            newStatus,
+                                            teamId
+                                    )
+                    );
+
+            int updated =
+                    future.get();
+
+            return result(
+                    updated,
+                    "Rescue status updated successfully"
+            );
+
+        } catch (Exception e) {
+
+            throw new RuntimeException(
+                    e.getMessage()
+            );
+
+        } finally {
+
+            executor.shutdown();
+        }
+    }
+
+
+    /* =========================================================
+       RESCUE TEAM FEATURE 4
+
+       ACCESS VICTIM LOCATION
+
+       OS CONCEPT:
+       SYSTEM-CALL / OS-MANAGED DATA ACCESS CONCEPT
+
+       JDBC performs controlled access to database data.
+       ========================================================= */
+
+    @GetMapping("/teams/{teamId}/victim-location")
+    public ResponseEntity<?> accessVictimLocation(
+            @PathVariable int teamId) {
+
+        try {
+
+            List<Map<String, Object>> rows =
+                    db.queryForList(
+                            "SELECT " +
+                            "rt.team_id, " +
+                            "rt.team_name, " +
+                            "rt.victim_id, " +
+                            "v.name AS victim_name, " +
+                            "v.phone, " +
+                            "v.location, " +
+                            "v.emergency_type, " +
+                            "v.severity, " +
+                            "v.status " +
+                            "FROM RESCUE_TEAM rt " +
+                            "INNER JOIN VICTIM v " +
+                            "ON rt.victim_id=v.victim_id " +
+                            "WHERE rt.team_id=?",
+                            teamId
+                    );
+
+            if (rows.isEmpty()) {
+
+                return ResponseEntity
+                        .notFound()
+                        .build();
+            }
+
+            return ResponseEntity.ok(
+                    rows.get(0)
+            );
+
+        } catch (Exception e) {
+
+            return ResponseEntity
+                    .internalServerError()
+                    .body(Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    ));
+        }
+    }
+
+
+    /* =========================================================
+       ADMIN ASSIGN TEAM
+       ========================================================= */
+
+    @PutMapping("/admin/assign-team")
+    public Map<String, Object> assignTeam(
+            @RequestBody Map<String, Object> b) {
+
+        int victimId = i(b, "victimId");
+        int teamId = i(b, "teamId");
+
+        try {
+
+            int victimUpdated =
+                    db.update(
+                            "UPDATE VICTIM SET " +
+                            "team_id=?, " +
+                            "status='Approved' " +
+                            "WHERE victim_id=?",
+                            teamId,
+                            victimId
+                    );
+
+            int teamUpdated =
+                    db.update(
+                            "UPDATE RESCUE_TEAM SET " +
+                            "victim_id=?, " +
+                            "rescue_status='Assigned' " +
+                            "WHERE team_id=?",
+                            victimId,
+                            teamId
+                    );
+
+            return Map.of(
+                    "success",
+                    victimUpdated > 0 &&
+                    teamUpdated > 0,
+
+                    "message",
+                    "Rescue team assigned successfully"
+            );
+
+        } catch (Exception e) {
+
+            throw new RuntimeException(
+                    e.getMessage()
+            );
+        }
+    }
+
+
+    /* =========================================================
+       VOLUNTEERS
+       ========================================================= */
 
     @GetMapping("/volunteers")
     public List<Map<String, Object>> volunteers() {
 
         return db.queryForList(
-
                 "SELECT " +
                 "v.*, " +
                 "s.shelter_name " +
-
                 "FROM VOLUNTEER v " +
-
                 "LEFT JOIN SHELTER_MANAGER s " +
                 "ON v.shelter_id=s.shelter_id " +
-
-                "ORDER BY v.volunteer_id DESC"
+                "ORDER BY v.volunteer_id"
         );
     }
 
+
+    /* =========================================================
+       ADD VOLUNTEER
+       ========================================================= */
 
     @PostMapping("/volunteers")
     public Map<String, Object> addVolunteer(
             @RequestBody Map<String, Object> b) {
 
-        Integer shelter =
-                iNullable(
-                        b,
-                        "shelterId"
-                );
+        String name = s(b, "name");
+        String phone = s(b, "phone");
+        String skill = s(b, "skill");
 
-        db.update(
+        Object shelterObject =
+                b.get("shelterId");
 
-                "INSERT INTO VOLUNTEER " +
-                "(name,phone,skill,shelter_id,availability) " +
+        int updated;
 
-                "VALUES(?,?,?,?,?)",
+        if (shelterObject == null) {
 
-                s(b, "name"),
-                s(b, "phone"),
-                s(b, "skill"),
-                shelter,
-                "Available"
-        );
+            updated =
+                    db.update(
+                            "INSERT INTO VOLUNTEER " +
+                            "(name, phone, skill, " +
+                            "availability) " +
+                            "VALUES (?, ?, ?, 'Available')",
+                            name,
+                            phone,
+                            skill
+                    );
 
-        return Map.of(
-                "message",
-                "Volunteer added"
+        } else {
+
+            int shelterId =
+                    i(b, "shelterId");
+
+            updated =
+                    db.update(
+                            "INSERT INTO VOLUNTEER " +
+                            "(name, phone, skill, " +
+                            "availability, shelter_id) " +
+                            "VALUES (?, ?, ?, " +
+                            "'Available', ?)",
+                            name,
+                            phone,
+                            skill,
+                            shelterId
+                    );
+        }
+
+        return result(
+                updated,
+                "Volunteer added successfully"
         );
     }
 
 
+    /* =========================================================
+       VOLUNTEER AVAILABILITY
+       ========================================================= */
+
     @PutMapping("/volunteers/{id}/availability")
-    public Map<String, Object> volunteerAvailability(
+    public Map<String, Object>
+    updateVolunteerAvailability(
             @PathVariable int id,
             @RequestBody Map<String, Object> b) {
 
-        return result(
+        String availability =
+                s(b, "availability");
 
+        int updated =
                 db.update(
-
                         "UPDATE VOLUNTEER " +
                         "SET availability=? " +
                         "WHERE volunteer_id=?",
-
-                        s(b, "availability"),
+                        availability,
                         id
-                ),
+                );
 
-                "Availability updated"
+        return result(
+                updated,
+                "Volunteer availability updated"
         );
     }
 
 
-    // =====================================================
-    // ADMIN
-    // =====================================================
-
-    @PostMapping("/admin")
-    public Map<String, Object> admin(
-            @RequestBody Map<String, Object> b) {
-
-        db.update(
-
-                "INSERT INTO ADMIN " +
-                "(name,email,password,phone) " +
-                "VALUES(?,?,?,?)",
-
-                s(b, "name"),
-                s(b, "email"),
-                s(b, "password"),
-                s(b, "phone")
-        );
-
-        return Map.of(
-                "message",
-                "Admin registered"
-        );
-    }
-
-
-    @GetMapping("/admins")
-    public List<Map<String, Object>> admins() {
-
-        return db.queryForList(
-
-                "SELECT " +
-                "admin_id,name,email,phone " +
-
-                "FROM ADMIN " +
-
-                "ORDER BY admin_id DESC"
-        );
-    }
-
-
-    // =====================================================
-    // DISASTER EVENT
-    // =====================================================
+    /* =========================================================
+       ADMIN DISASTER EVENT
+       ========================================================= */
 
     @PutMapping("/admin/disaster")
     public Map<String, Object> disaster(
             @RequestBody Map<String, Object> b) {
 
-        return result(
-
-                db.update(
-
-                        "UPDATE VICTIM SET " +
-                        "emergency_type=?, " +
-                        "location=?, " +
-                        "status='Emergency Active' " +
-                        "WHERE victim_id=?",
-
-                        s(b, "emergencyType"),
-                        s(b, "location"),
-                        i(b, "victimId")
-                ),
-
-                "Disaster event updated"
+        return Map.of(
+                "success", true,
+                "message",
+                "Disaster event information updated"
         );
     }
 
 
-    // =====================================================
-    // ASSIGN SHELTER
-    // =====================================================
+    /* =========================================================
+       ADMIN SHELTER ASSIGNMENT
+       ========================================================= */
 
     @PutMapping("/admin/shelter")
-    public Map<String, Object> shelter(
+    public Map<String, Object> assignShelter(
             @RequestBody Map<String, Object> b) {
 
-        int victimId =
-                i(b, "victimId");
+        int victimId = i(b, "victimId");
+        int shelterId = i(b, "shelterId");
 
-        int shelterId =
-                i(b, "shelterId");
+        int updated =
+                db.update(
+                        "UPDATE VICTIM SET " +
+                        "shelter_id=?, " +
+                        "status='Shelter Assigned' " +
+                        "WHERE victim_id=?",
+                        shelterId,
+                        victimId
+                );
 
+        if (updated > 0) {
 
-        int n = db.update(
+            try {
 
-                "UPDATE VICTIM SET " +
-                "shelter_id=?, " +
-                "status='Shelter Assigned' " +
-                "WHERE victim_id=?",
+                db.update(
+                        "UPDATE SHELTER_MANAGER " +
+                        "SET available_beds=" +
+                        "available_beds-1 " +
+                        "WHERE shelter_id=? " +
+                        "AND available_beds>0",
+                        shelterId
+                );
 
-                shelterId,
-                victimId
-        );
-
-
-        if (n > 0) {
-
-            db.update(
-
-                    "UPDATE SHELTER_MANAGER " +
-
-                    "SET available_beds=" +
-                    "GREATEST(available_beds-1,0) " +
-
-                    "WHERE shelter_id=? " +
-                    "AND available_beds>0",
-
-                    shelterId
-            );
+            } catch (Exception ignored) {
+            }
         }
 
-
         return result(
-                n,
-                "Shelter assigned"
+                updated,
+                "Shelter assigned successfully"
         );
     }
 
 
-    // =====================================================
-    // REPORT
-    // =====================================================
+    /* =========================================================
+       REPORT
+       ========================================================= */
 
     @GetMapping("/report")
     public List<Map<String, Object>> report() {
 
         return db.queryForList(
-
                 "SELECT " +
-
                 "v.victim_id, " +
-                "v.name, " +
+                "v.name AS victim_name, " +
                 "v.location, " +
                 "v.emergency_type, " +
                 "v.severity, " +
                 "v.status, " +
-                "v.resource_status, " +
-
-                "v.team_id, " +
-
-                "t.team_name, " +
-                "s.shelter_name " +
-
+                "rt.team_name, " +
+                "sm.shelter_name, " +
+                "v.resource_status " +
                 "FROM VICTIM v " +
-
-                "LEFT JOIN RESCUE_TEAM t " +
-                "ON v.team_id=t.team_id " +
-
-                "LEFT JOIN SHELTER_MANAGER s " +
-                "ON v.shelter_id=s.shelter_id " +
-
+                "LEFT JOIN RESCUE_TEAM rt " +
+                "ON v.team_id=rt.team_id " +
+                "LEFT JOIN SHELTER_MANAGER sm " +
+                "ON v.shelter_id=sm.shelter_id " +
                 "ORDER BY v.victim_id DESC"
         );
     }
 
 
-    // =====================================================
-    // FCFS
-    // =====================================================
+    /* =========================================================
+       FCFS SCHEDULING
+       ========================================================= */
 
     @PostMapping("/scheduling/fcfs")
     public Map<String, Object> fcfs(
             @RequestBody List<Map<String, Object>> jobs) {
 
-        jobs.sort(
+        if (jobs == null ||
+            jobs.isEmpty()) {
+
+            return Map.of(
+                    "success", false,
+                    "message",
+                    "No scheduling jobs supplied"
+            );
+        }
+
+        List<Map<String, Object>> sorted =
+                new ArrayList<>(jobs);
+
+        sorted.sort(
                 Comparator.comparingInt(
-                        x -> i(x, "arrival")
+                        (Map<String, Object> x) ->
+                                i(x, "arrival")
                 )
         );
 
-
-        int time = 0;
+        int currentTime = 0;
 
         double totalWaiting = 0;
         double totalTurnaround = 0;
 
-        List<Map<String, Object>> out =
+        List<Map<String, Object>> result =
                 new ArrayList<>();
 
+        for (Map<String, Object> job : sorted) {
 
-        for (var j : jobs) {
+            int pid = i(job, "pid");
+            int arrival = i(job, "arrival");
+            int burst = i(job, "burst");
 
-            int arrival =
-                    i(j, "arrival");
+            if (currentTime < arrival) {
+                currentTime = arrival;
+            }
 
-            int burst =
-                    i(j, "burst");
-
-
-            time =
-                    Math.max(
-                            time,
-                            arrival
-                    ) + burst;
-
+            int start = currentTime;
 
             int completion =
-                    time;
+                    start + burst;
 
             int turnaround =
                     completion - arrival;
@@ -1544,204 +1650,368 @@ public class ResqsimController {
             int waiting =
                     turnaround - burst;
 
-
             totalWaiting += waiting;
             totalTurnaround += turnaround;
 
+            Map<String, Object> row =
+                    new LinkedHashMap<>();
 
-            out.add(
-                    Map.of(
+            row.put("pid", pid);
+            row.put("arrival", arrival);
+            row.put("burst", burst);
+            row.put("start", start);
+            row.put("completion", completion);
+            row.put("waiting", waiting);
+            row.put("turnaround", turnaround);
 
-                            "id",
-                            s(j, "id"),
+            result.add(row);
 
-                            "arrival",
-                            arrival,
-
-                            "burst",
-                            burst,
-
-                            "completion",
-                            completion,
-
-                            "waiting",
-                            waiting,
-
-                            "turnaround",
-                            turnaround
-                    )
-            );
+            currentTime = completion;
         }
 
-
         return Map.of(
-
-                "jobs",
-                out,
-
-                "avgWaiting",
-                jobs.isEmpty()
-                        ? 0
-                        : totalWaiting / jobs.size(),
-
-                "avgTurnaround",
-                jobs.isEmpty()
-                        ? 0
-                        : totalTurnaround / jobs.size()
+                "success", true,
+                "jobs", result,
+                "averageWaitingTime",
+                totalWaiting / result.size(),
+                "averageTurnaroundTime",
+                totalTurnaround / result.size()
         );
     }
 
 
-    // =====================================================
-    // PRIORITY
-    // =====================================================
+    /* =========================================================
+       PRIORITY SCHEDULING
+
+       Higher priority number = higher priority
+
+       IMPORTANT:
+       This version intentionally uses normal loops instead
+       of stream Comparator lambdas so that Java 17 does not
+       produce the Object -> Map<String,Object> compilation
+       error.
+       ========================================================= */
 
     @PostMapping("/scheduling/priority")
     public Map<String, Object> priority(
             @RequestBody List<Map<String, Object>> jobs) {
 
-        jobs.sort(
-                (a, b) ->
-                        Integer.compare(
-                                i(b, "priority"),
-                                i(a, "priority")
-                        )
-        );
+        if (jobs == null ||
+            jobs.isEmpty()) {
 
+            return Map.of(
+                    "success", false,
+                    "message",
+                    "No scheduling jobs supplied"
+            );
+        }
 
-        int time = 0;
+        List<Map<String, Object>> pending =
+                new ArrayList<>(jobs);
 
-        double totalWaiting = 0;
-        double totalTurnaround = 0;
-
-        List<Map<String, Object>> out =
+        List<Map<String, Object>> result =
                 new ArrayList<>();
 
+        int currentTime = 0;
 
-        for (var j : jobs) {
+        double totalWaiting = 0;
+
+        double totalTurnaround = 0;
+
+
+        while (!pending.isEmpty()) {
+
+            /*
+             * Find all processes that have arrived.
+             */
+
+            List<Map<String, Object>> available =
+                    new ArrayList<>();
+
+            for (Map<String, Object> job : pending) {
+
+                int arrival =
+                        i(job, "arrival");
+
+                if (arrival <= currentTime) {
+
+                    available.add(job);
+                }
+            }
+
+
+            /*
+             * If no process has arrived,
+             * move time to the earliest arrival.
+             */
+
+            if (available.isEmpty()) {
+
+                int earliestArrival =
+                        Integer.MAX_VALUE;
+
+                Map<String, Object> earliestJob =
+                        null;
+
+                for (Map<String, Object> job : pending) {
+
+                    int arrival =
+                            i(job, "arrival");
+
+                    if (arrival < earliestArrival) {
+
+                        earliestArrival =
+                                arrival;
+
+                        earliestJob =
+                                job;
+                    }
+                }
+
+                if (earliestJob == null) {
+                    break;
+                }
+
+                currentTime =
+                        earliestArrival;
+
+                available.clear();
+
+                for (Map<String, Object> job : pending) {
+
+                    int arrival =
+                            i(job, "arrival");
+
+                    if (arrival <= currentTime) {
+
+                        available.add(job);
+                    }
+                }
+            }
+
+
+            /*
+             * Select highest-priority process.
+             *
+             * Higher priority number wins.
+             *
+             * If priority is equal,
+             * earlier arrival wins.
+             */
+
+            Map<String, Object> selected =
+                    available.get(0);
+
+            for (Map<String, Object> job : available) {
+
+                int jobPriority =
+                        i(job, "priority");
+
+                int selectedPriority =
+                        i(selected, "priority");
+
+                int jobArrival =
+                        i(job, "arrival");
+
+                int selectedArrival =
+                        i(selected, "arrival");
+
+
+                if (jobPriority > selectedPriority) {
+
+                    selected = job;
+
+                } else if (
+                        jobPriority ==
+                                selectedPriority
+                        &&
+                        jobArrival <
+                                selectedArrival
+                ) {
+
+                    selected = job;
+                }
+            }
+
+
+            /*
+             * Remove selected process.
+             */
+
+            pending.remove(selected);
+
+
+            /*
+             * Process information.
+             */
+
+            int pid =
+                    i(selected, "pid");
+
+            int arrival =
+                    i(selected, "arrival");
 
             int burst =
-                    i(j, "burst");
+                    i(selected, "burst");
 
-            time += burst;
+            int priority =
+                    i(selected, "priority");
 
+
+            /*
+             * Start time.
+             */
+
+            int start =
+                    currentTime;
+
+
+            /*
+             * Completion time.
+             */
 
             int completion =
-                    time;
+                    start + burst;
+
+
+            /*
+             * Turnaround Time:
+             *
+             * TAT = CT - AT
+             */
 
             int turnaround =
-                    completion;
+                    completion - arrival;
+
+
+            /*
+             * Waiting Time:
+             *
+             * WT = TAT - BT
+             */
 
             int waiting =
                     turnaround - burst;
 
 
             totalWaiting += waiting;
+
             totalTurnaround += turnaround;
 
 
-            out.add(
-                    Map.of(
+            /*
+             * Create result row.
+             */
 
-                            "id",
-                            s(j, "id"),
+            Map<String, Object> row =
+                    new LinkedHashMap<>();
 
-                            "burst",
-                            burst,
-
-                            "priority",
-                            i(j, "priority"),
-
-                            "completion",
-                            completion,
-
-                            "waiting",
-                            waiting,
-
-                            "turnaround",
-                            turnaround
-                    )
+            row.put(
+                    "pid",
+                    pid
             );
+
+            row.put(
+                    "arrival",
+                    arrival
+            );
+
+            row.put(
+                    "burst",
+                    burst
+            );
+
+            row.put(
+                    "priority",
+                    priority
+            );
+
+            row.put(
+                    "start",
+                    start
+            );
+
+            row.put(
+                    "completion",
+                    completion
+            );
+
+            row.put(
+                    "waiting",
+                    waiting
+            );
+
+            row.put(
+                    "turnaround",
+                    turnaround
+            );
+
+            result.add(row);
+
+
+            /*
+             * Move CPU time forward.
+             */
+
+            currentTime =
+                    completion;
         }
 
 
+        /*
+         * Return result.
+         */
+
         return Map.of(
-
-                "jobs",
-                out,
-
-                "avgWaiting",
-                jobs.isEmpty()
-                        ? 0
-                        : totalWaiting / jobs.size(),
-
-                "avgTurnaround",
-                jobs.isEmpty()
-                        ? 0
-                        : totalTurnaround / jobs.size()
+                "success", true,
+                "jobs", result,
+                "averageWaitingTime",
+                totalWaiting / result.size(),
+                "averageTurnaroundTime",
+                totalTurnaround / result.size()
         );
     }
 
 
-    // =====================================================
-    // HELPER METHODS
-    // =====================================================
+    /* =========================================================
+       HELPER: COUNT
+       ========================================================= */
 
-    private int count(String table) {
+    private int count(String sql) {
 
-        return number(
-                "SELECT COUNT(*) FROM " +
-                table
-        );
+        try {
+
+            Integer value =
+                    db.queryForObject(
+                            sql,
+                            Integer.class
+                    );
+
+            return value == null
+                    ? 0
+                    : value;
+
+        } catch (Exception e) {
+
+            return 0;
+        }
     }
 
 
-    private int count(
-            String table,
-            String where) {
+    /* =========================================================
+       HELPER: INTEGER
+       ========================================================= */
 
-        return number(
-
-                "SELECT COUNT(*) FROM " +
-                table +
-                " WHERE " +
-                where
-        );
-    }
-
-
-    private int number(String sql) {
-
-        Integer x =
-                db.queryForObject(
-                        sql,
-                        Integer.class
-                );
-
-        return x == null
-                ? 0
-                : x;
-    }
-
-
-    private static String s(
-            Map<String, Object> b,
-            String key) {
-
-        return Objects.toString(
-                b.get(key),
-                ""
-        );
-    }
-
-
-    private static int i(
-            Map<String, Object> b,
+    private int i(
+            Map<String, Object> map,
             String key) {
 
         Object value =
-                b.get(key);
+                map.get(key);
 
+        if (value == null) {
+            return 0;
+        }
 
         if (value instanceof Number) {
 
@@ -1749,63 +2019,89 @@ public class ResqsimController {
                     .intValue();
         }
 
+        try {
 
-        return Integer.parseInt(
-                Objects.toString(
-                        value,
-                        "0"
-                )
-        );
+            return Integer.parseInt(
+                    value.toString()
+            );
+
+        } catch (Exception e) {
+
+            return 0;
+        }
     }
 
 
-    private static Integer iNullable(
-            Map<String, Object> b,
+    /* =========================================================
+       HELPER: NULLABLE INTEGER
+       ========================================================= */
+
+    private int iNullable(
+            Map<String, Object> map,
             String key) {
 
         Object value =
-                b.get(key);
+                map.get(key);
 
-
-        if (
-                value == null ||
-                Objects.toString(
-                        value,
-                        ""
-                ).isBlank() ||
-                "0".equals(
-                        Objects.toString(
-                                value
-                        )
-                )
-        ) {
-
-            return null;
+        if (value == null) {
+            return 0;
         }
 
+        if (value instanceof Number) {
 
-        return i(b, key);
+            return ((Number) value)
+                    .intValue();
+        }
+
+        try {
+
+            return Integer.parseInt(
+                    value.toString()
+            );
+
+        } catch (Exception e) {
+
+            return 0;
+        }
     }
 
 
-    private static Map<String, Object> result(
-            int n,
+    /* =========================================================
+       HELPER: STRING
+       ========================================================= */
+
+    private String s(
+            Map<String, Object> map,
+            String key) {
+
+        Object value =
+                map.get(key);
+
+        return value == null
+                ? ""
+                : value.toString();
+    }
+
+
+    /* =========================================================
+       HELPER: RESULT
+       ========================================================= */
+
+    private Map<String, Object> result(
+            int updated,
             String message) {
 
-        return n > 0
+        return Map.of(
+                "success",
+                updated > 0,
 
-                ? Map.of(
-                        "success",
-                        true,
-                        "message",
-                        message
-                )
+                "updated",
+                updated,
 
-                : Map.of(
-                        "success",
-                        false,
-                        "message",
-                        "Record not found"
-                );
+                "message",
+                updated > 0
+                        ? message
+                        : "No record was updated"
+        );
     }
 }

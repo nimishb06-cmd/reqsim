@@ -31,6 +31,7 @@ async function api(url, opt = {}) {
     } catch (_) {}
 
     if (!r.ok) {
+
         throw Error(
             body.message || 'Request failed'
         );
@@ -103,13 +104,19 @@ $$('.login-tab').forEach(button => {
         const admin =
             button.dataset.role === 'admin';
 
-        $('#adminLogin')
-            .classList
-            .toggle('hidden', !admin);
+        if ($('#adminLogin')) {
 
-        $('#victimLogin')
-            .classList
-            .toggle('hidden', admin);
+            $('#adminLogin')
+                .classList
+                .toggle('hidden', !admin);
+        }
+
+        if ($('#victimLogin')) {
+
+            $('#victimLogin')
+                .classList
+                .toggle('hidden', admin);
+        }
     };
 
 });
@@ -158,6 +165,9 @@ if (victimLoginForm) {
 
         const form = new FormData(e.target);
 
+        const phone =
+            form.get('phone');
+
         await doLogin({
 
             role: 'victim',
@@ -167,8 +177,9 @@ if (victimLoginForm) {
                     form.get('victimId')
                 ),
 
-            phone:
-                form.get('phone')
+            phone: phone,
+
+            email: phone
 
         });
     };
@@ -184,14 +195,14 @@ async function doLogin(payload) {
     try {
 
         const response =
-            await api('/login', {
-
-                method: 'POST',
-
-                body:
-                    JSON.stringify(payload)
-
-            });
+            await api(
+                '/login',
+                {
+                    method: 'POST',
+                    body:
+                        JSON.stringify(payload)
+                }
+            );
 
         session = response;
 
@@ -221,73 +232,64 @@ async function doLogin(payload) {
 /* =====================================================
    SHOW APPLICATION
 ===================================================== */
-
 function showApp() {
+    if (!session) return;
 
-    if (!session) {
-        return;
-    }
-
-    const loginScreen =
-        $('#loginScreen');
+    const loginScreen = $('#loginScreen');
 
     if (loginScreen) {
         loginScreen.classList.add('hidden');
     }
 
-
     if (session.role === 'admin') {
+        stopVictimAutoRefresh();
 
-        $('#adminApp')
-            .classList
-            .remove('hidden');
+        if ($('#adminApp')) {
+            $('#adminApp').classList.remove('hidden');
+        }
 
-        $('#victimApp')
-            .classList
-            .add('hidden');
+        if ($('#victimApp')) {
+            $('#victimApp').classList.add('hidden');
+        }
 
         loadAll();
-
     } else {
+        if ($('#victimApp')) {
+            $('#victimApp').classList.remove('hidden');
+        }
 
-        $('#victimApp')
-            .classList
-            .remove('hidden');
-
-        $('#adminApp')
-            .classList
-            .add('hidden');
+        if ($('#adminApp')) {
+            $('#adminApp').classList.add('hidden');
+        }
 
         loadVictimPortal();
+        startVictimAutoRefresh();
     }
 }
-
 
 /* =====================================================
    LOGOUT
 ===================================================== */
 
 function logout() {
+    stopVictimAutoRefresh();
 
     session = null;
 
-    localStorage.removeItem(
-        'resqsimSession'
-    );
+    localStorage.removeItem('resqsimSession');
 
-    $('#adminApp')
-        .classList
-        .add('hidden');
+    if ($('#adminApp')) {
+        $('#adminApp').classList.add('hidden');
+    }
 
-    $('#victimApp')
-        .classList
-        .add('hidden');
+    if ($('#victimApp')) {
+        $('#victimApp').classList.add('hidden');
+    }
 
-    $('#loginScreen')
-        .classList
-        .remove('hidden');
+    if ($('#loginScreen')) {
+        $('#loginScreen').classList.remove('hidden');
+    }
 }
-
 
 /* =====================================================
    PAGE LABELS
@@ -370,23 +372,40 @@ function go(page) {
 
     if (labels[page]) {
 
-        $('#pageTitle').textContent =
-            labels[page][0];
+        if ($('#pageTitle')) {
 
-        $('#pageSub').textContent =
-            labels[page][1];
+            $('#pageTitle').textContent =
+                labels[page][0];
+        }
+
+        if ($('#pageSub')) {
+
+            $('#pageSub').textContent =
+                labels[page][1];
+        }
     }
+
 
     if (page === 'reports') {
         loadReport();
     }
+
+
+    if (page === 'teams') {
+    loadRescueRequests();
+}
+
 }
 
 
 $$('.nav').forEach(button => {
 
     button.onclick = () => {
-        go(button.dataset.page);
+
+        go(
+            button.dataset.page
+        );
+
     };
 
 });
@@ -405,6 +424,7 @@ async function loadAll() {
             victims,
             sos,
             teams,
+            rescueRequests,
             vols,
             shelters,
             resources,
@@ -419,54 +439,82 @@ async function loadAll() {
 
             api('/teams'),
 
+            api('/teams/rescue-requests'),
+
             api('/volunteers'),
 
             api('/shelters'),
 
-            api('/admin/resources'),
+            api('/admin/resource-requests'),
 
-            api('/resources/inventory')
+            api('/admin/inventory')
+
         ]);
 
 
         data = {
 
-            victims,
+            victims:
+                victims || [],
 
-            teams,
+            teams:
+                teams || [],
 
-            sos,
+            rescueRequests:
+                rescueRequests || [],
 
-            vols,
+            sos:
+                sos || [],
 
-            shelters,
+            vols:
+                vols || [],
 
-            res: resources,
+            shelters:
+                shelters || [],
 
-            inventory
+            res:
+                resources || [],
+
+            inventory:
+                inventory || []
 
         };
 
 
         renderDash(dash);
 
-        renderVictims(victims);
+        renderVictims(
+            data.victims
+        );
 
-        renderSos(sos);
+        renderSos(
+            data.sos
+        );
 
-        renderTeams(teams);
+        renderTeams(
+            data.teams,
+            data.rescueRequests
+        );
 
-        renderVols(vols);
+        renderVols(
+            data.vols
+        );
 
-        renderShelters(shelters);
+        renderShelters(
+            data.shelters
+        );
 
-        renderResources(resources);
+        renderResources(
+            data.res
+        );
 
-        renderInventory(inventory);
+        renderInventory(
+            data.inventory
+        );
 
         fillSelects(
-            shelters,
-            teams
+            data.shelters,
+            data.teams
         );
 
 
@@ -474,19 +522,27 @@ async function loadAll() {
             await api('/health');
 
 
-        $('#dbState').textContent =
-            health.ok
-                ? '● MySQL connected'
-                : '● Database error';
+        const databaseOK =
+            health.success === true ||
+            health.ok === true;
 
 
-        $('#dbState').className =
-            'db-pill ' +
-            (
-                health.ok
-                    ? 'ok'
-                    : 'bad'
-            );
+        if ($('#dbState')) {
+
+            $('#dbState').textContent =
+                databaseOK
+                    ? '● MySQL connected'
+                    : '● Database error';
+
+            $('#dbState').className =
+                'db-pill ' +
+                (
+                    databaseOK
+                        ? 'ok'
+                        : 'bad'
+                );
+        }
+
 
     } catch (error) {
 
@@ -516,139 +572,212 @@ async function loadAll() {
    DASHBOARD
 ===================================================== */
 
-function renderDash(d) {
+function renderDash(d = {}) {
 
-    $('#heroSos').textContent =
-        d.pendingSos;
-
-
-    $('#stats').innerHTML = [
-
-        ['Victims', d.victims, '👥'],
-
-        ['Pending SOS', d.pendingSos, '🚨'],
-
-        ['Assigned teams', d.activeTeams, '🚑'],
-
-        ['Available beds', d.availableBeds, '🏠']
-
-    ].map(x => `
-
-        <div class="stat">
-
-            <span>${x[2]}</span>
-
-            <small>${x[0]}</small>
-
-            <b>${x[1]}</b>
-
-        </div>
-
-    `).join('');
+    const pendingSOS =
+        d.pendingSOS ??
+        d.pendingSos ??
+        0;
 
 
-    $('#dashSos').innerHTML =
+    const availableBeds =
+        d.shelterBeds ??
+        d.availableBeds ??
+        0;
 
-        (data.sos || [])
 
-            .slice(0, 5)
+    const availableTeams =
+        d.availableTeams ??
+        0;
 
-            .map(x => `
 
-                <div class="alert-row">
+    const activeTeams =
+        d.activeTeams ??
+        0;
 
-                    <div>
 
-                        <b>${escapeHtml(x.name)}</b>
+    const volunteers =
+        d.volunteers ??
+        0;
 
-                        <small>
 
-                            ${escapeHtml(
-                                x.location ||
-                                'Location pending'
-                            )}
+    if ($('#heroSos')) {
 
-                            ·
+        $('#heroSos').textContent =
+            pendingSOS;
+    }
 
-                            ${escapeHtml(
-                                x.emergency_type ||
-                                'Emergency'
-                            )}
 
-                        </small>
+    if ($('#stats')) {
+
+        $('#stats').innerHTML = [
+
+            [
+                'Registered victims',
+                d.victims || 0,
+                '👥'
+            ],
+
+            [
+                'Pending SOS',
+                pendingSOS,
+                '🚨'
+            ],
+
+            [
+                'Resolved SOS',
+                d.resolvedSOS || 0,
+                '✅'
+            ],
+
+            [
+                'High-priority SOS',
+                d.highPrioritySOS || 0,
+                '⚠️'
+            ],
+
+            [
+                'Assigned teams',
+                activeTeams,
+                '🚑'
+            ],
+
+            [
+                'Available beds',
+                availableBeds,
+                '🏠'
+            ]
+
+        ].map(x => `
+
+            <div class="stat">
+
+                <span>${x[2]}</span>
+
+                <small>${x[0]}</small>
+
+                <b>${x[1]}</b>
+
+            </div>
+
+        `).join('');
+    }
+
+
+    if ($('#dashSos')) {
+
+        $('#dashSos').innerHTML =
+
+            (data.sos || [])
+
+                .slice(0, 5)
+
+                .map(x => `
+
+                    <div class="alert-row">
+
+                        <div>
+
+                            <b>
+                                ${escapeHtml(
+                                    x.name
+                                )}
+                            </b>
+
+                            <small>
+
+                                ${escapeHtml(
+                                    x.location ||
+                                    'Location pending'
+                                )}
+
+                                ·
+
+                                ${escapeHtml(
+                                    x.emergency_type ||
+                                    'Emergency'
+                                )}
+
+                            </small>
+
+                        </div>
+
+                        <span class="badge red">
+
+                            Severity
+                            ${x.severity}
+
+                        </span>
 
                     </div>
 
-                    <span class="badge red">
+                `).join('')
 
-                        Severity ${x.severity}
+            ||
 
-                    </span>
-
-                </div>
-
-            `).join('')
-
-        ||
-
-        '<p class="muted">No pending SOS requests.</p>';
+            '<p class="muted">No pending SOS requests.</p>';
+    }
 
 
     const total =
         (
-            d.availableTeams +
-            d.activeTeams
+            availableTeams +
+            activeTeams
         ) || 1;
 
 
-    $('#capacity').innerHTML = `
+    if ($('#capacity')) {
 
-        <div class="metric">
+        $('#capacity').innerHTML = `
 
-            <div>
+            <div class="metric">
 
-                <span>
-                    Teams available
-                </span>
+                <div>
 
-                <b>
-                    ${d.availableTeams}
-                </b>
+                    <span>
+                        Teams available
+                    </span>
 
-            </div>
+                    <b>
+                        ${availableTeams}
+                    </b>
 
-            <div class="mini-progress">
+                </div>
 
-                <span
-                    style="width:${
-                        d.availableTeams /
-                        total *
-                        100
-                    }%">
-                </span>
+                <div class="mini-progress">
 
-            </div>
+                    <span
+                        style="width:${
+                            (
+                                availableTeams /
+                                total
+                            ) * 100
+                        }%">
+                    </span>
 
-        </div>
-
-
-        <div class="metric">
-
-            <div>
-
-                <span>
-                    Volunteers registered
-                </span>
-
-                <b>
-                    ${d.volunteers}
-                </b>
+                </div>
 
             </div>
 
-        </div>
 
-    `;
+            <div class="metric">
+
+                <div>
+
+                    <span>
+                        Volunteers registered
+                    </span>
+
+                    <b>
+                        ${volunteers}
+                    </b>
+
+                </div>
+
+            </div>
+
+        `;
+    }
 }
 
 
@@ -658,16 +787,22 @@ function renderDash(d) {
 
 function badge(status) {
 
+    const value =
+        String(status || '—');
+
+
     const className =
 
-        status?.includes('Pending') ||
-        status?.includes('Severity 5')
+        value.includes('Pending') ||
+        value.includes('Severity 5') ||
+        value.includes('Priority 4')
 
             ? 'red'
 
-            : status?.includes('Allocated') ||
-              status === 'Approved' ||
-              status === 'Available'
+            : value.includes('Allocated') ||
+              value === 'Approved' ||
+              value === 'Available' ||
+              value === 'Completed'
 
                 ? 'green'
 
@@ -678,7 +813,7 @@ function badge(status) {
 
         <span class="badge ${className}">
 
-            ${escapeHtml(status || '—')}
+            ${escapeHtml(value)}
 
         </span>
 
@@ -692,9 +827,18 @@ function badge(status) {
 
 function renderVictims(a) {
 
+    const rows =
+        a || [];
+
+
+    if (!$('#victimRows')) {
+        return;
+    }
+
+
     $('#victimRows').innerHTML =
 
-        a.map(x => `
+        rows.map(x => `
 
             <tr>
 
@@ -703,15 +847,23 @@ function renderVictims(a) {
                 </td>
 
                 <td>
-                    <b>${escapeHtml(x.name)}</b>
+                    <b>
+                        ${escapeHtml(
+                            x.name
+                        )}
+                    </b>
                 </td>
 
                 <td>
-                    ${escapeHtml(x.phone || '—')}
+                    ${escapeHtml(
+                        x.phone || '—'
+                    )}
                 </td>
 
                 <td>
-                    ${escapeHtml(x.location || '—')}
+                    ${escapeHtml(
+                        x.location || '—'
+                    )}
                 </td>
 
                 <td>
@@ -725,7 +877,9 @@ function renderVictims(a) {
                 </td>
 
                 <td>
-                    ${badge(x.status)}
+                    ${badge(
+                        x.status
+                    )}
                 </td>
 
                 <td>
@@ -733,32 +887,32 @@ function renderVictims(a) {
                     ${
                         x.team_id
 
-                        ? `
+                            ? `
 
-                            <div class="team-cell">
+                                <div class="team-cell">
 
-                                <b>
-                                    #${x.team_id}
-                                </b>
+                                    <b>
+                                        #${x.team_id}
+                                    </b>
 
-                                <span>
-                                    ${escapeHtml(
-                                        x.team_name ||
-                                        'Rescue Team'
-                                    )}
+                                    <span>
+                                        ${escapeHtml(
+                                            x.team_name ||
+                                            'Rescue Team'
+                                        )}
+                                    </span>
+
+                                </div>
+
+                              `
+
+                            : `
+
+                                <span class="muted">
+                                    Not Assigned
                                 </span>
 
-                            </div>
-
-                          `
-
-                        : `
-
-                            <span class="muted">
-                                Not Assigned
-                            </span>
-
-                          `
+                              `
                     }
 
                 </td>
@@ -814,9 +968,14 @@ function renderVictims(a) {
 
 function renderSos(a) {
 
+    if (!$('#sosRows')) {
+        return;
+    }
+
+
     $('#sosRows').innerHTML =
 
-        a.map(x => `
+        (a || []).map(x => `
 
             <tr>
 
@@ -827,17 +986,23 @@ function renderSos(a) {
                 <td>
 
                     <b>
-                        ${escapeHtml(x.name)}
+                        ${escapeHtml(
+                            x.name
+                        )}
                     </b>
 
                     <small>
-                        ${escapeHtml(x.phone || '')}
+                        ${escapeHtml(
+                            x.phone || ''
+                        )}
                     </small>
 
                 </td>
 
                 <td>
-                    ${escapeHtml(x.location || '—')}
+                    ${escapeHtml(
+                        x.location || '—'
+                    )}
                 </td>
 
                 <td>
@@ -847,10 +1012,12 @@ function renderSos(a) {
                 </td>
 
                 <td>
+
                     ${badge(
                         'Severity ' +
                         x.severity
                     )}
+
                 </td>
 
                 <td>
@@ -872,6 +1039,16 @@ function renderSos(a) {
                         )">
 
                         Assign team
+
+                    </button>
+
+                    <button
+                        class="primary small"
+                        onclick="resolveSos(
+                            ${x.victim_id}
+                        )">
+
+                        Mark resolved
 
                     </button>
 
@@ -898,128 +1075,570 @@ function renderSos(a) {
 
 
 /* =====================================================
-   RESCUE TEAMS
-   UPDATED:
-   Displays the victim_id assigned to each team
+   RESOLVE SOS
 ===================================================== */
 
-function renderTeams(a) {
+async function resolveSos(victimId) {
 
-    $('#teamCards').innerHTML =
+    if (!confirm(
+        `Mark SOS for Victim #${victimId} as resolved?`
+    )) {
+        return;
+    }
 
-        a.map(x => `
+    try {
+        const response = await api(
+            `/admin/sos/${victimId}/resolve`,
+            { method: 'PUT' }
+        );
 
+        toast(response.message || 'SOS marked as resolved');
+        await loadAll();
+    } catch (error) {
+        toast(error.message);
+    }
+}
+/* =====================================================
+   RESCUE TEAMS
+===================================================== */
+
+
+/* =====================================================
+   RESCUE TEAMS
+   Displays team details and assigned victim details.
+   Pending rescue requests are NOT shown inside cards.
+   ===================================================== */
+
+function renderTeams(teams) {
+    const container = $('#teamCards');
+
+    if (!container) return;
+
+    container.innerHTML = (teams || []).map(team => {
+        const assignedVictim =
+            team.victim_id !== null &&
+            team.victim_id !== undefined &&
+            team.victim_id !== '' &&
+            Number(team.victim_id) > 0;
+
+        const status = team.rescue_status || 'Available';
+
+        return `
             <div class="card team">
-
-                <div class="team-icon">
-                    🚑
-                </div>
+                <div class="team-icon">🚑</div>
 
                 <h3>
-                    #${x.team_id}
-                    ·
-                    ${escapeHtml(
-                        x.team_name ||
-                        'Rescue Team'
-                    )}
+                    #${escapeHtml(String(team.team_id ?? '—'))}
+                    · ${escapeHtml(team.team_name || 'Rescue Team')}
                 </h3>
 
                 <p>
-
                     <b>Leader:</b>
-                    ${escapeHtml(
-                        x.leader || '—'
-                    )}
-
+                    ${escapeHtml(team.leader || '—')}
                 </p>
 
                 <p>
-
                     <b>Vehicle:</b>
-                    ${escapeHtml(
-                        x.vehicle || '—'
-                    )}
-
+                    ${escapeHtml(team.vehicle || '—')}
                 </p>
-
-                ${badge(x.rescue_status)}
-
-
-                ${
-                    x.victim_id
-
-                        ? `
-
-                            <div
-                                class="assigned-victim"
-                                style="
-                                    margin-top:12px;
-                                    padding:10px;
-                                    border-radius:8px;
-                                    background:rgba(0,0,0,0.04);
-                                "
-                            >
-
-                                <strong>
-                                    Assigned Victim ID:
-                                </strong>
-
-                                <span>
-                                    #${x.victim_id}
-                                </span>
-
-                            </div>
-
-                          `
-
-                        : `
-
-                            <p class="muted">
-                                No victim assigned
-                            </p>
-
-                          `
-                }
-
-
-                ${
-                    x.rescue_status ===
-                    'Available'
-
-                        ? `
-
-                            <p class="muted">
-                                Ready for dispatch
-                            </p>
-
-                          `
-
-                        : `
-
-                            <p class="muted">
-                                Currently assigned
-                            </p>
-
-                          `
-                }
-
-            </div>
-
-        `).join('')
-
-        ||
-
-        `
-
-            <div class="card">
 
                 <p>
-                    No rescue teams registered.
+                    <b>Status:</b> ${badge(status)}
                 </p>
 
-            </div>
+                <div style="
+                    margin-top:12px;
+                    padding:12px;
+                    border-radius:8px;
+                    background:rgba(0,0,0,0.04);
+                ">
+                    <strong>Assigned Victim</strong>
 
+                    ${
+                        assignedVictim
+                            ? `
+                                <p>
+                                    <b>Victim ID:</b>
+                                    #${escapeHtml(String(team.victim_id))}
+                                </p>
+
+                                <p>
+                                    <b>Name:</b>
+                                    ${escapeHtml(team.victim_name || 'Name unavailable')}
+                                </p>
+
+                                <p>
+                                    <b>Severity:</b>
+                                    ${escapeHtml(
+                                        team.victim_severity != null
+                                            ? String(team.victim_severity)
+                                            : 'Not available'
+                                    )}
+                                </p>
+
+                                <p>
+                                    <b>Location:</b>
+                                    ${escapeHtml(team.victim_location || 'Location unavailable')}
+                                </p>
+                            `
+                            : `<p class="muted">No victim assigned.</p>`
+                    }
+                </div>
+
+                ${
+                    status === 'Available'
+                        ? `
+                            <button
+                                class="ghost small"
+                                style="margin-top:12px;width:100%;"
+                                onclick="acceptRescueOperation(${Number(team.team_id)})">
+                                ✓ Accept Rescue Operation
+                            </button>
+                        `
+                        : ''
+                }
+
+                <button
+                    class="ghost small"
+                    style="margin-top:8px;width:100%;"
+                    onclick="updateRescueStatus(${Number(team.team_id)})">
+                    🔄 Update Rescue Status
+                </button>
+
+                ${
+                    assignedVictim
+                        ? `
+                            <button
+                                class="ghost small"
+                                style="margin-top:8px;width:100%;"
+                                onclick="accessVictimLocation(${Number(team.team_id)})">
+                                📍 Access Victim Location
+                            </button>
+                        `
+                        : ''
+                }
+            </div>
         `;
+    }).join('') || `
+        <div class="card">
+            <p>No rescue teams registered.</p>
+        </div>
+    `;
+}
+
+
+
+/* =====================================================
+   RESCUE FEATURE 1
+   VIEW RESCUE REQUESTS
+   OS: PRIORITY SCHEDULING
+===================================================== */
+
+
+/* =====================================================
+   RESCUE FEATURE 1
+   LOAD PENDING RESCUE REQUESTS
+   Used by Accept Rescue Operation.
+   Requests are not displayed inside team cards.
+   ===================================================== */
+
+async function loadRescueRequests() {
+    try {
+        const requests = await api('/teams/rescue-requests');
+
+        data.rescueRequests = requests || [];
+
+    } catch (error) {
+        console.error('Rescue request error:', error);
+
+        toast(
+            'Could not load rescue requests: ' + error.message
+        );
+    }
+}
+
+/* =====================================================
+   RESCUE FEATURE 2
+   ACCEPT RESCUE OPERATION
+   OS: PROCESS SYNCHRONIZATION
+===================================================== */
+
+async function acceptRescueOperation(
+    teamId
+) {
+
+    try {
+
+        await loadRescueRequests();
+        const requests = data.rescueRequests || [];
+
+
+        const availableRequests =
+            requests.filter(
+                x =>
+                    !x.team_id &&
+                    (
+                        x.status === 'SOS Pending' ||
+                        !x.status
+                    )
+            );
+
+
+        if (!availableRequests.length) {
+
+            toast(
+                'No pending rescue requests available'
+            );
+
+            return;
+        }
+
+
+        let message =
+            'Pending Rescue Requests:\n\n';
+
+
+        availableRequests.forEach(x => {
+
+            message +=
+
+                'Victim ID: ' +
+                x.victim_id +
+
+                ' | ' +
+                x.name +
+
+                ' | Severity: ' +
+                x.severity +
+
+                ' | ' +
+                (
+                    x.location ||
+                    ''
+                ) +
+
+                '\n';
+        });
+
+
+        message +=
+            '\nEnter Victim ID to accept:';
+
+
+        const victimId =
+            Number(
+                prompt(message)
+            );
+
+
+        if (
+            !Number.isInteger(victimId) ||
+            victimId <= 0
+        ) {
+
+            toast(
+                'Invalid Victim ID'
+            );
+
+            return;
+        }
+
+
+        const request =
+            availableRequests.find(
+                x =>
+                    Number(
+                        x.victim_id
+                    ) === victimId
+            );
+
+
+        if (!request) {
+
+            toast(
+                'Victim ID not found in pending requests'
+            );
+
+            return;
+        }
+
+
+        const confirmed =
+            confirm(
+
+                'Accept rescue operation?\n\n' +
+
+                'Victim: ' +
+                request.name +
+
+                '\nLocation: ' +
+                (
+                    request.location ||
+                    '—'
+                ) +
+
+                '\nSeverity: ' +
+                request.severity +
+
+                '\nTeam ID: ' +
+                teamId
+
+            );
+
+
+        if (!confirmed) {
+            return;
+        }
+
+
+        const response =
+            await api(
+                '/teams/accept',
+                {
+
+                    method: 'PUT',
+
+                    body:
+                        JSON.stringify({
+
+                            victimId:
+                                victimId,
+
+                            teamId:
+                                teamId
+
+                        })
+
+                }
+            );
+
+
+        toast(
+            response.message ||
+            'Rescue operation accepted'
+        );
+
+
+        await loadAll();
+
+
+    } catch (error) {
+
+        console.error(
+            'Accept rescue error:',
+            error
+        );
+
+        toast(
+            error.message
+        );
+    }
+}
+
+
+/* =====================================================
+   RESCUE FEATURE 3
+   UPDATE RESCUE STATUS
+   OS: MULTITHREADING
+===================================================== */
+
+async function updateRescueStatus(
+    teamId
+) {
+
+    const statuses = [
+
+        'Assigned',
+
+        'On the Way',
+
+        'Rescue In Progress',
+
+        'Completed',
+
+        'Available'
+
+    ];
+
+
+    let message =
+        'Select Rescue Status:\n\n';
+
+
+    statuses.forEach(
+        (status, index) => {
+
+            message +=
+                (index + 1) +
+                '. ' +
+                status +
+                '\n';
+
+        }
+    );
+
+
+    const choice =
+        Number(
+            prompt(message)
+        );
+
+
+    if (
+        !Number.isInteger(choice) ||
+        choice < 1 ||
+        choice > statuses.length
+    ) {
+
+        toast(
+            'Invalid status selection'
+        );
+
+        return;
+    }
+
+
+    const newStatus =
+        statuses[
+            choice - 1
+        ];
+
+
+    try {
+
+        const response =
+            await api(
+
+                `/teams/${teamId}/status`,
+
+                {
+
+                    method: 'PUT',
+
+                    body:
+                        JSON.stringify({
+
+                            status:
+                                newStatus
+
+                        })
+
+                }
+
+            );
+
+
+        toast(
+            response.message ||
+            'Rescue status updated'
+        );
+
+
+        await loadAll();
+
+
+    } catch (error) {
+
+        console.error(
+            'Status update error:',
+            error
+        );
+
+        toast(
+            error.message
+        );
+    }
+}
+
+
+/* =====================================================
+   RESCUE FEATURE 4
+   ACCESS VICTIM LOCATION
+   OS: CONTROLLED DATA ACCESS
+===================================================== */
+
+async function accessVictimLocation(
+    teamId
+) {
+
+    try {
+
+        const victim =
+            await api(
+
+                `/teams/${teamId}/victim-location`
+
+            );
+
+
+        alert(
+
+            'VICTIM LOCATION\n\n' +
+
+            'Team ID: ' +
+            (
+                victim.team_id ||
+                '—'
+            ) +
+
+            '\nTeam: ' +
+            (
+                victim.team_name ||
+                '—'
+            ) +
+
+            '\n\nVictim ID: ' +
+            (
+                victim.victim_id ||
+                '—'
+            ) +
+
+            '\nVictim Name: ' +
+            (
+                victim.victim_name ||
+                '—'
+            ) +
+
+            '\nPhone: ' +
+            (
+                victim.phone ||
+                '—'
+            ) +
+
+            '\n\nLOCATION:\n' +
+            (
+                victim.location ||
+                'Not available'
+            ) +
+
+            '\n\nEmergency: ' +
+            (
+                victim.emergency_type ||
+                '—'
+            ) +
+
+            '\nSeverity: ' +
+            (
+                victim.severity ||
+                '—'
+            ) +
+
+            '\nStatus: ' +
+            (
+                victim.status ||
+                '—'
+            )
+
+        );
+
+
+    } catch (error) {
+
+        toast(
+            'Could not access victim location: ' +
+            error.message
+        );
+    }
 }
 
 
@@ -1029,22 +1648,35 @@ function renderTeams(a) {
 
 function renderVols(a) {
 
+    if (!$('#volRows')) {
+        return;
+    }
+
+
     $('#volRows').innerHTML =
 
-        a.map(x => `
+        (a || []).map(x => `
 
             <tr>
 
                 <td>
-                    <b>${escapeHtml(x.name)}</b>
+                    <b>
+                        ${escapeHtml(
+                            x.name
+                        )}
+                    </b>
                 </td>
 
                 <td>
-                    ${escapeHtml(x.phone || '—')}
+                    ${escapeHtml(
+                        x.phone || '—'
+                    )}
                 </td>
 
                 <td>
-                    ${escapeHtml(x.skill || '—')}
+                    ${escapeHtml(
+                        x.skill || '—'
+                    )}
                 </td>
 
                 <td>
@@ -1054,7 +1686,9 @@ function renderVols(a) {
                 </td>
 
                 <td>
-                    ${badge(x.availability)}
+                    ${badge(
+                        x.availability
+                    )}
                 </td>
 
                 <td>
@@ -1101,9 +1735,14 @@ function renderVols(a) {
 
 function renderShelters(a) {
 
+    if (!$('#shelterCards')) {
+        return;
+    }
+
+
     $('#shelterCards').innerHTML =
 
-        a.map(x => `
+        (a || []).map(x => `
 
             <div class="card shelter">
 
@@ -1114,7 +1753,9 @@ function renderShelters(a) {
                     </div>
 
                     ${badge(
-                        x.available_beds > 0
+                        Number(
+                            x.available_beds
+                        ) > 0
                             ? 'Available'
                             : 'Full'
                     )}
@@ -1122,22 +1763,28 @@ function renderShelters(a) {
                 </div>
 
                 <h3>
-                    ${escapeHtml(x.shelter_name)}
+                    ${escapeHtml(
+                        x.shelter_name
+                    )}
                 </h3>
 
                 <p>
-                    ${escapeHtml(x.address || '—')}
+                    ${escapeHtml(
+                        x.address ||
+                        x.location ||
+                        '—'
+                    )}
                 </p>
 
                 <div class="bed-number">
 
                     <b>
-                        ${x.available_beds}
+                        ${x.available_beds ?? 0}
                     </b>
 
                     <span>
                         available beds of
-                        ${x.capacity}
+                        ${x.capacity ?? 0}
                     </span>
 
                 </div>
@@ -1146,12 +1793,18 @@ function renderShelters(a) {
 
                     <span
                         style="width:${
-                            Math.min(
-                                100,
-                                x.available_beds /
-                                x.capacity *
-                                100
-                            )
+                            x.capacity
+                                ? Math.min(
+                                    100,
+                                    Number(
+                                        x.available_beds
+                                    ) /
+                                    Number(
+                                        x.capacity
+                                    ) *
+                                    100
+                                )
+                                : 0
                         }%">
                     </span>
 
@@ -1189,33 +1842,81 @@ function renderShelters(a) {
 
 /* =====================================================
    RESOURCE REQUESTS
+   BACKEND RETURNS ONLY PENDING REQUESTS
 ===================================================== */
 
 function renderResources(a) {
 
+    if (!$('#resourceRows')) {
+        return;
+    }
+
+
+    /*
+       IMPORTANT:
+
+       The backend endpoint:
+
+       GET /admin/resource-requests
+
+       already returns ONLY records where:
+
+       resource_request IS NOT NULL
+       resource_request is not empty
+       resource_status = 'Pending'
+
+       Therefore we do NOT perform another
+       frontend status filter here.
+    */
+
+    const pendingRequests =
+        a || [];
+
+
     $('#resourceRows').innerHTML =
 
-        a.map(x => {
+        pendingRequests.map(x => {
 
             let resourceName =
-                x.resource_request || '—';
+                x.resource_request ||
+                x.resource ||
+                '—';
 
-            let quantity = 1;
+
+            let quantity =
+                Number(
+                    x.quantity ??
+                    x.requested_quantity ??
+                    1
+                );
+
+
+            /*
+               Database may store:
+
+               Medicine:5
+               Food:10
+               Water:20
+            */
 
             if (
+                typeof resourceName === 'string' &&
                 resourceName.includes(':')
             ) {
 
                 const parts =
                     resourceName.split(':');
 
+
                 resourceName =
                     parts[0].trim();
+
 
                 const parsedQuantity =
                     Number(
                         parts[1].trim()
                     );
+
 
                 if (
                     Number.isFinite(
@@ -1238,13 +1939,17 @@ function renderResources(a) {
                         #${x.victim_id}
 
                         <b>
-                            ${escapeHtml(x.name)}
+                            ${escapeHtml(
+                                x.name
+                            )}
                         </b>
 
                     </td>
 
                     <td>
-                        ${escapeHtml(resourceName)}
+                        ${escapeHtml(
+                            resourceName
+                        )}
                     </td>
 
                     <td>
@@ -1253,7 +1958,8 @@ function renderResources(a) {
 
                     <td>
                         ${badge(
-                            x.resource_status
+                            x.resource_status ||
+                            'Pending'
                         )}
                     </td>
 
@@ -1284,7 +1990,9 @@ function renderResources(a) {
             <tr>
 
                 <td colspan="5">
+
                     No pending resource requests.
+
                 </td>
 
             </tr>
@@ -1299,9 +2007,14 @@ function renderResources(a) {
 
 function renderInventory(a) {
 
+    if (!$('#inventoryRows')) {
+        return;
+    }
+
+
     $('#inventoryRows').innerHTML =
 
-        a.map(x => `
+        (a || []).map(x => `
 
             <tr>
 
@@ -1314,16 +2027,16 @@ function renderInventory(a) {
                 </td>
 
                 <td>
-                    ${x.total_quantity}
+                    ${x.total_quantity ?? 0}
                 </td>
 
                 <td>
-                    ${x.allocated_quantity}
+                    ${x.allocated_quantity ?? 0}
                 </td>
 
                 <td>
                     <b>
-                        ${x.remaining_quantity}
+                        ${x.remaining_quantity ?? 0}
                     </b>
                 </td>
 
@@ -1378,6 +2091,7 @@ async function addInventoryResource() {
             'Enter resource name:'
         );
 
+
     if (!resourceName) {
         return;
     }
@@ -1407,7 +2121,7 @@ async function addInventoryResource() {
     try {
 
         await api(
-            '/admin/resources/inventory',
+            '/admin/inventory',
             {
 
                 method: 'POST',
@@ -1430,7 +2144,7 @@ async function addInventoryResource() {
             'Resource added'
         );
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -1439,13 +2153,14 @@ async function addInventoryResource() {
         );
     }
 }
-
-
 /* =====================================================
    ADD STOCK
 ===================================================== */
 
-async function addStock(id, name) {
+async function addStock(
+    id,
+    name
+) {
 
     const quantity =
         Number(
@@ -1474,9 +2189,9 @@ async function addStock(id, name) {
 
         await api(
 
-            '/admin/resources/inventory/' +
+            '/admin/inventory/' +
             id +
-            '/add-stock',
+            '/stock',
 
             {
 
@@ -1498,7 +2213,8 @@ async function addStock(id, name) {
             'Stock added'
         );
 
-        loadAll();
+
+        await loadAll();
 
     } catch (error) {
 
@@ -1518,52 +2234,69 @@ function fillSelects(
     teams
 ) {
 
-    $('#teamSelect').innerHTML =
+    if ($('#teamSelect')) {
 
-        '<option value="">Select available rescue team</option>' +
+        $('#teamSelect').innerHTML =
 
-        teams
-            .filter(
-                x =>
-                    x.rescue_status ===
-                    'Available'
-            )
-            .map(x => `
+            '<option value="">Select available rescue team</option>' +
 
-                <option
-                    value="${x.team_id}">
+            (teams || [])
+                .filter(
+                    x =>
+                        x.rescue_status ===
+                        'Available'
+                )
+                .map(x => `
 
-                    #${x.team_id}
-                    ${escapeHtml(x.team_name)}
-                    —
-                    ${escapeHtml(x.leader || '')}
-                    —
-                    ${escapeHtml(x.vehicle || '')}
+                    <option
+                        value="${x.team_id}">
 
-                </option>
+                        #${x.team_id}
 
-            `)
-            .join('');
+                        ${escapeHtml(
+                            x.team_name
+                        )}
+
+                        —
+
+                        ${escapeHtml(
+                            x.leader || ''
+                        )}
+
+                        —
+
+                        ${escapeHtml(
+                            x.vehicle || ''
+                        )}
+
+                    </option>
+
+                `)
+                .join('');
+    }
 
 
-    $('#volShelter').innerHTML =
+    if ($('#volShelter')) {
 
-        '<option value="0">No shelter</option>' +
+        $('#volShelter').innerHTML =
 
-        shelters
-            .map(x => `
+            '<option value="0">No shelter</option>' +
 
-                <option
-                    value="${x.shelter_id}">
+            (shelters || [])
+                .map(x => `
 
-                    ${escapeHtml(
-                        x.shelter_name
-                    )}
+                    <option
+                        value="${x.shelter_id}">
 
-                </option>
+                        ${escapeHtml(
+                            x.shelter_name
+                        )}
 
-            `)
-            .join('');
+                    </option>
+
+                `)
+                .join('');
+    }
 }
 
 
@@ -1588,9 +2321,12 @@ async function registerVictim(e) {
 
                     method: 'POST',
 
-                    body: JSON.stringify(
-                        Object.fromEntries(form)
-                    )
+                    body:
+                        JSON.stringify(
+                            Object.fromEntries(
+                                form
+                            )
+                        )
 
                 }
             );
@@ -1600,21 +2336,17 @@ async function registerVictim(e) {
             'victimModal'
         );
 
+
         e.target.reset();
 
 
         toast(
-
-            response.message +
-
-            ` — Victim ID ${
-                response.victimId
-            }`
-
+            response.message ||
+            'Victim registered successfully'
         );
 
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -1631,8 +2363,14 @@ async function registerVictim(e) {
 
 function openSos(id) {
 
-    $('#sosModal input[name=id]')
-        .value = id;
+    const input =
+        $('#sosModal input[name=id]');
+
+
+    if (input) {
+        input.value = id;
+    }
+
 
     openModal(
         'sosModal'
@@ -1653,21 +2391,36 @@ async function createSos(e) {
         const form =
             new FormData(e.target);
 
-        const id =
-            form.get('id');
+
+        const object =
+            Object.fromEntries(form);
+
+
+        const victimId =
+            Number(
+                object.id
+            );
+
+
+        delete object.id;
+
+
+        object.victimId =
+            victimId;
 
 
         await api(
 
-            `/victims/${id}/sos`,
+            '/victims/sos',
 
             {
 
-                method: 'PUT',
+                method: 'POST',
 
-                body: JSON.stringify(
-                    Object.fromEntries(form)
-                )
+                body:
+                    JSON.stringify(
+                        object
+                    )
 
             }
 
@@ -1687,7 +2440,7 @@ async function createSos(e) {
         );
 
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -1704,8 +2457,14 @@ async function createSos(e) {
 
 function openTeam(id) {
 
-    $('#teamModal input[name=victimId]')
-        .value = id;
+    const input =
+        $('#teamModal input[name=victimId]');
+
+
+    if (input) {
+        input.value = id;
+    }
+
 
     openModal(
         'teamModal'
@@ -1725,6 +2484,7 @@ async function assignTeam(e) {
 
         const form =
             new FormData(e.target);
+
 
         const object =
             Object.fromEntries(form);
@@ -1750,7 +2510,9 @@ async function assignTeam(e) {
                     method: 'PUT',
 
                     body:
-                        JSON.stringify(object)
+                        JSON.stringify(
+                            object
+                        )
 
                 }
             );
@@ -1769,7 +2531,7 @@ async function assignTeam(e) {
         );
 
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -1793,6 +2555,7 @@ async function registerRescueTeam(e) {
         const form =
             new FormData(e.target);
 
+
         const object =
             Object.fromEntries(form);
 
@@ -1811,7 +2574,9 @@ async function registerRescueTeam(e) {
                     method: 'POST',
 
                     body:
-                        JSON.stringify(object)
+                        JSON.stringify(
+                            object
+                        )
 
                 }
             );
@@ -1833,7 +2598,7 @@ async function registerRescueTeam(e) {
         );
 
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -1846,9 +2611,6 @@ async function registerRescueTeam(e) {
 
 /* =====================================================
    REQUEST RESOURCE
-   ADMIN VICTIM MANAGEMENT
-
-   Opens the resource modal instead of prompt().
 ===================================================== */
 
 async function requestResource(id) {
@@ -1857,11 +2619,20 @@ async function requestResource(id) {
 
         const inventory =
             await api(
-                '/resources/inventory/available'
+                '/admin/inventory'
             );
 
 
-        if (!inventory.length) {
+        const available =
+            (inventory || []).filter(
+                x =>
+                    Number(
+                        x.remaining_quantity
+                    ) > 0
+            );
+
+
+        if (!available.length) {
 
             toast(
                 'No resources are currently available'
@@ -1889,7 +2660,7 @@ async function requestResource(id) {
 
             '<option value="">Select resource</option>' +
 
-            inventory
+            available
                 .map(x => `
 
                     <option
@@ -1905,6 +2676,7 @@ async function requestResource(id) {
                         )}
 
                         —
+
                         ${x.remaining_quantity}
                         available
 
@@ -1925,18 +2697,6 @@ async function requestResource(id) {
         }
 
 
-        const quantityInput =
-            $('#resourceRequestModal input[name=quantity]');
-
-
-        if (quantityInput) {
-
-            quantityInput.value = '';
-
-            quantityInput.max = '';
-        }
-
-
         openModal(
             'resourceRequestModal'
         );
@@ -1952,7 +2712,7 @@ async function requestResource(id) {
 
 
 /* =====================================================
-   ADMIN RESOURCE REQUEST SUBMISSION
+   ADMIN RESOURCE REQUEST
 ===================================================== */
 
 async function submitAdminResourceRequest(e) {
@@ -2014,35 +2774,6 @@ async function submitAdminResourceRequest(e) {
         }
 
 
-        const select =
-            $('#adminResourceSelect');
-
-
-        const selectedOption =
-            select.options[
-                select.selectedIndex
-            ];
-
-
-        const available =
-            Number(
-                selectedOption?.dataset?.available
-            );
-
-
-        if (
-            Number.isFinite(available) &&
-            quantity > available
-        ) {
-
-            toast(
-                `Only ${available} units are available`
-            );
-
-            return;
-        }
-
-
         await api(
 
             `/victims/${victimId}/resource`,
@@ -2051,15 +2782,16 @@ async function submitAdminResourceRequest(e) {
 
                 method: 'PUT',
 
-                body: JSON.stringify({
+                body:
+                    JSON.stringify({
 
-                    resource:
-                        resource,
+                        resource:
+                            resource,
 
-                    quantity:
-                        quantity
+                        quantity:
+                            quantity
 
-                })
+                    })
 
             }
 
@@ -2079,7 +2811,7 @@ async function submitAdminResourceRequest(e) {
         );
 
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -2091,33 +2823,64 @@ async function submitAdminResourceRequest(e) {
 
 
 /* =====================================================
-   ALLOCATE REQUESTED RESOURCE
+   ALLOCATE RESOURCE
 ===================================================== */
 
 async function allocate(id) {
 
     try {
 
-        await api(
+        const confirmed =
+            confirm(
+                'Allocate resources to Victim #' +
+                id +
+                '?\n\nAfter allocation, this request will be removed from the pending request list.'
+            );
 
-            '/admin/resources/' +
-            id,
 
-            {
+        if (!confirmed) {
+            return;
+        }
 
-                method: 'PUT'
 
-            }
+        const response =
+            await api(
 
-        );
+                '/admin/resources/' +
+                id,
+
+                {
+
+                    method: 'PUT'
+
+                }
+
+            );
 
 
         toast(
+            response.message ||
             'Resources allocated successfully'
         );
 
 
-        loadAll();
+        /*
+           IMPORTANT:
+
+           Reloading data calls:
+
+           GET /admin/resource-requests
+
+           The backend returns ONLY:
+
+           resource_status = 'Pending'
+
+           Therefore the allocated request
+           automatically disappears.
+        */
+
+        await loadAll();
+
 
     } catch (error) {
 
@@ -2126,8 +2889,6 @@ async function allocate(id) {
         );
     }
 }
-
-
 
 
 /* =====================================================
@@ -2143,14 +2904,25 @@ async function addVolunteer(e) {
         const form =
             new FormData(e.target);
 
+
         const object =
             Object.fromEntries(form);
 
 
-        object.shelterId =
-            Number(
-                object.shelterId
-            ) || null;
+        if (
+            object.shelterId === '' ||
+            object.shelterId === '0'
+        ) {
+
+            delete object.shelterId;
+
+        } else {
+
+            object.shelterId =
+                Number(
+                    object.shelterId
+                );
+        }
 
 
         await api(
@@ -2160,7 +2932,9 @@ async function addVolunteer(e) {
                 method: 'POST',
 
                 body:
-                    JSON.stringify(object)
+                    JSON.stringify(
+                        object
+                    )
 
             }
         );
@@ -2179,7 +2953,7 @@ async function addVolunteer(e) {
         );
 
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -2209,19 +2983,20 @@ async function toggleVol(
 
                 method: 'PUT',
 
-                body: JSON.stringify({
+                body:
+                    JSON.stringify({
 
-                    availability:
-                        availability
+                        availability:
+                            availability
 
-                })
+                    })
 
             }
 
         );
 
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -2249,6 +3024,23 @@ async function assignShelter(id) {
     }
 
 
+    const victimId =
+        Number(victim);
+
+
+    if (
+        !Number.isInteger(victimId) ||
+        victimId <= 0
+    ) {
+
+        toast(
+            'Invalid Victim ID'
+        );
+
+        return;
+    }
+
+
     try {
 
         await api(
@@ -2257,15 +3049,16 @@ async function assignShelter(id) {
 
                 method: 'PUT',
 
-                body: JSON.stringify({
+                body:
+                    JSON.stringify({
 
-                    victimId:
-                        Number(victim),
+                        victimId:
+                            victimId,
 
-                    shelterId:
-                        id
+                        shelterId:
+                            id
 
-                })
+                    })
 
             }
         );
@@ -2276,7 +3069,7 @@ async function assignShelter(id) {
         );
 
 
-        loadAll();
+        await loadAll();
 
     } catch (error) {
 
@@ -2301,26 +3094,40 @@ async function loadReport() {
             );
 
 
+        if (!$('#reportRows')) {
+            return;
+        }
+
+
         $('#reportRows').innerHTML =
 
-            report.map(x => `
+            (report || []).map(x => `
 
                 <tr>
 
                     <td>
+
                         #${x.victim_id}
-                        ${escapeHtml(x.name)}
+
+                        ${escapeHtml(
+                            x.victim_name ||
+                            x.name ||
+                            ''
+                        )}
+
                     </td>
 
                     <td>
                         ${escapeHtml(
-                            x.location || '—'
+                            x.location ||
+                            '—'
                         )}
                     </td>
 
                     <td>
                         ${escapeHtml(
-                            x.emergency_type || '—'
+                            x.emergency_type ||
+                            '—'
                         )}
                     </td>
 
@@ -2329,30 +3136,49 @@ async function loadReport() {
                     </td>
 
                     <td>
-                        ${badge(x.status)}
-                    </td>
-
-                    <td>
-                        ${escapeHtml(
-                            x.team_name || '—'
+                        ${badge(
+                            x.status
                         )}
                     </td>
 
                     <td>
                         ${escapeHtml(
-                            x.shelter_name || '—'
+                            x.team_name ||
+                            '—'
                         )}
                     </td>
 
                     <td>
                         ${escapeHtml(
-                            x.resource_status || '—'
+                            x.shelter_name ||
+                            '—'
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            x.resource_status ||
+                            '—'
                         )}
                     </td>
 
                 </tr>
 
-            `).join('');
+            `).join('')
+
+        ||
+
+            `
+
+                <tr>
+
+                    <td colspan="8">
+                        No report data available.
+                    </td>
+
+                </tr>
+
+            `;
 
 
     } catch (error) {
@@ -2365,7 +3191,42 @@ async function loadReport() {
 
 
 /* =====================================================
-   SCHEDULING
+   LOAD LIVE SOS INTO PRIORITY SCHEDULER
+===================================================== */
+
+async function loadSosForScheduling() {
+    try {
+        const requests = await api('/admin/sos');
+
+        if (!requests.length) {
+            toast('There are no pending SOS requests to schedule.');
+            return;
+        }
+
+        const input = $('#priorityInput');
+        if (!input) {
+            toast('Priority scheduling input not found.');
+            return;
+        }
+
+        // Format: process ID, burst time, priority, arrival time.
+        // Use severity as priority and victim ID order as the FCFS tie-break.
+        input.value = requests
+            .map((request, index) =>
+                `P${request.victim_id},1,${Number(request.severity) || 1},${index}`
+            )
+            .join('\\n');
+
+        go('scheduling');
+        toast(`Loaded ${requests.length} pending SOS request(s). Run Priority to calculate the schedule.`);
+    } catch (error) {
+        toast('Could not load pending SOS requests: ' + error.message);
+    }
+}
+
+
+/* =====================================================
+   OS SCHEDULING
 ===================================================== */
 
 async function runSchedule(type) {
@@ -2378,56 +3239,87 @@ async function runSchedule(type) {
                 : 'priorityInput';
 
 
+        const input =
+            $('#' + inputId);
+
+
+        if (!input) {
+
+            toast(
+                'Scheduling input not found'
+            );
+
+            return;
+        }
+
+
         const raw =
-            $('#' + inputId)
-                .value
+            input.value
                 .trim()
                 .split('\n')
                 .filter(Boolean);
 
 
         const jobs =
-            raw.map(line => {
+            raw.map((line, index) => {
 
                 const parts =
                     line
                         .split(',')
-                        .map(x =>
-                            x.trim()
+                        .map(
+                            x => x.trim()
                         );
 
 
+                // Accept both numeric IDs (1) and labels (P1).
+                const pidMatch = String(
+                    parts[0] || (index + 1)
+                ).match(/-?\\d+/);
+
+                const pid = pidMatch
+                    ? Number(pidMatch[0])
+                    : index + 1;
+
                 if (type === 'fcfs') {
-
                     return {
-
-                        id:
-                            parts[0],
-
-                        arrival:
-                            Number(parts[1]),
-
-                        burst:
-                            Number(parts[2])
-
+                        pid,
+                        arrival: Number(parts[1]),
+                        burst: Number(parts[2])
                     };
                 }
 
-
                 return {
-
-                    id:
-                        parts[0],
-
-                    burst:
-                        Number(parts[1]),
-
-                    priority:
-                        Number(parts[2])
-
+                    pid,
+                    arrival: parts.length > 3
+                        ? Number(parts[3])
+                        : 0,
+                    burst: Number(parts[1]),
+                    priority: Number(parts[2])
                 };
+
             });
 
+
+        const invalidJob = jobs.some(job =>
+            !Number.isInteger(job.pid) ||
+            !Number.isFinite(job.burst) ||
+            job.burst <= 0 ||
+            (type === 'fcfs' &&
+                (!Number.isFinite(job.arrival) || job.arrival < 0)) ||
+            (type === 'priority' &&
+                (!Number.isFinite(job.priority) ||
+                 !Number.isFinite(job.arrival) ||
+                 job.arrival < 0))
+        );
+
+        if (invalidJob) {
+            toast(
+                type === 'fcfs'
+                    ? 'Use ID, arrival time, burst time; burst must be positive.'
+                    : 'Use ID, burst time, priority[, arrival time]; burst must be positive.'
+            );
+            return;
+        }
 
         const response =
             await api(
@@ -2440,89 +3332,113 @@ async function runSchedule(type) {
                     method: 'POST',
 
                     body:
-                        JSON.stringify(jobs)
+                        JSON.stringify(
+                            jobs
+                        )
 
                 }
 
             );
 
 
-        $('#scheduleResult').innerHTML = `
-
-            <h3>
-                Scheduling result
-            </h3>
-
-            <div class="schedule-metrics">
-
-                <span>
-
-                    Average waiting
-
-                    <b>
-                        ${
-                            response.avgWaiting
-                                .toFixed(2)
-                        }
-                    </b>
-
-                </span>
+        const avgWaiting =
+            response.averageWaitingTime ??
+            response.avgWaiting ??
+            0;
 
 
-                <span>
-
-                    Average turnaround
-
-                    <b>
-                        ${
-                            response.avgTurnaround
-                                .toFixed(2)
-                        }
-                    </b>
-
-                </span>
-
-            </div>
+        const avgTurnaround =
+            response.averageTurnaroundTime ??
+            response.avgTurnaround ??
+            0;
 
 
-            <div class="tablewrap">
+        if ($('#scheduleResult')) {
 
-                <table>
+            const resultJobs =
+                response.jobs ||
+                response.processes ||
+                [];
 
-                    <thead>
 
-                        <tr>
+            $('#scheduleResult').innerHTML = `
+
+                <h3>
+                    Scheduling result
+                </h3>
+
+
+                <div class="schedule-metrics">
+
+                    <span>
+
+                        Average waiting
+
+                        <b>
+                            ${Number(
+                                avgWaiting
+                            ).toFixed(2)}
+                        </b>
+
+                    </span>
+
+
+                    <span>
+
+                        Average turnaround
+
+                        <b>
+                            ${Number(
+                                avgTurnaround
+                            ).toFixed(2)}
+                        </b>
+
+                    </span>
+
+                </div>
+
+
+                <div class="tablewrap">
+
+                    <table>
+
+                        <thead>
+
+                            <tr>
+
+                                ${
+                                    Object.keys(
+                                        resultJobs[0] || {}
+                                    )
+                                    .map(key => `
+
+                                        <th>
+                                            ${escapeHtml(
+                                                key
+                                            )}
+                                        </th>
+
+                                    `)
+                                    .join('')
+                                }
+
+                            </tr>
+
+                        </thead>
+
+
+                        <tbody>
 
                             ${
-                                Object.keys(
-                                    response.jobs[0] || {}
-                                )
-                                .map(key => `
+                                resultJobs
+                                    .map(job => `
 
-                                    <th>
-                                        ${escapeHtml(key)}
-                                    </th>
+                                        <tr>
 
-                                `)
-                                .join('')
-                            }
-
-                        </tr>
-
-                    </thead>
-
-
-                    <tbody>
-
-                        ${
-                            response.jobs
-
-                                .map(job => `
-
-                                    <tr>
-
-                                        ${
-                                            Object.values(job)
+                                            ${
+                                                Object.values(
+                                                    job
+                                                )
                                                 .map(value => `
 
                                                     <td>
@@ -2533,21 +3449,23 @@ async function runSchedule(type) {
 
                                                 `)
                                                 .join('')
-                                        }
+                                            }
 
-                                    </tr>
+                                        </tr>
 
-                                `)
-                                .join('')
-                        }
+                                    `)
+                                    .join('')
+                            }
 
-                    </tbody>
+                        </tbody>
 
-                </table>
+                    </table>
 
-            </div>
+                </div>
 
-        `;
+            `;
+        }
+
 
     } catch (error) {
 
@@ -2557,205 +3475,424 @@ async function runSchedule(type) {
     }
 }
 
+/* =====================================================
+   VICTIM LIVE SOS AND RESCUE TRACKING
+===================================================== */
+
+function renderVictimTracking(track) {
+    const container = $('#victimTracking');
+
+    if (!container) return;
+
+    if (!track) {
+        container.innerHTML = `
+            <p class="muted">
+                Tracking information is not available yet.
+            </p>
+        `;
+        return;
+    }
+
+    const sosStatus =
+        track.status ||
+        track.sos_status ||
+        'Registered';
+
+    const teamId =
+        track.team_id ??
+        track.teamId ??
+        null;
+
+    const teamName =
+        track.team_name ||
+        track.teamName ||
+        (teamId ? `Team #${teamId}` : 'Not assigned');
+
+    const rescueStatus =
+        track.rescue_status ||
+        track.rescueStatus ||
+        (teamId ? 'Team assigned' : 'Waiting for assignment');
+
+    const resourceStatus =
+        track.resource_status ||
+        track.resourceStatus ||
+        'No resource request';
+
+    const stages = [
+        {
+            title: 'SOS submitted',
+            description: 'Your emergency request has been recorded.',
+            complete: true
+        },
+        {
+            title: 'Command center review',
+            description: sosStatus,
+            complete: ![
+                'Registered',
+                'SOS Pending',
+                'Pending'
+            ].includes(sosStatus)
+        },
+        {
+            title: 'Rescue team',
+            description: `${teamName} · ${rescueStatus}`,
+            complete: Boolean(teamId)
+        },
+        {
+            title: 'Emergency resolution',
+            description: sosStatus,
+            complete: /resolved|completed/i.test(sosStatus)
+        }
+    ];
+
+    container.innerHTML = `
+        <div class="status-list">
+            <div>
+                <span>SOS status</span>
+                <b>${escapeHtml(sosStatus)}</b>
+            </div>
+
+            <div>
+                <span>Rescue team</span>
+                <b>${escapeHtml(teamName)}</b>
+            </div>
+
+            <div>
+                <span>Rescue progress</span>
+                <b>${escapeHtml(rescueStatus)}</b>
+            </div>
+
+            <div>
+                <span>Resource request</span>
+                <b>${escapeHtml(resourceStatus)}</b>
+            </div>
+        </div>
+
+        <div class="victim-tracking-stages" style="margin-top:16px;">
+            ${stages.map((stage, index) => `
+                <div style="
+                    display:flex;
+                    gap:12px;
+                    align-items:flex-start;
+                    margin:12px 0;
+                ">
+                    <span style="
+                        display:flex;
+                        align-items:center;
+                        justify-content:center;
+                        min-width:28px;
+                        height:28px;
+                        border-radius:50%;
+                        background:${stage.complete
+                            ? '#d1fae5'
+                            : '#e5e7eb'};
+                        color:${stage.complete
+                            ? '#065f46'
+                            : '#374151'};
+                        font-weight:700;
+                    ">
+                        ${stage.complete ? '✓' : index + 1}
+                    </span>
+
+                    <div>
+                        <b>${escapeHtml(stage.title)}</b>
+                        <p class="muted" style="margin:4px 0;">
+                            ${escapeHtml(stage.description)}
+                        </p>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+
+        <p class="muted" style="margin-top:12px;">
+            Tracking refreshes automatically while you are signed in.
+        </p>
+    `;
+}
+
+
+/* =====================================================
+   VICTIM RESOURCE REQUEST HISTORY
+===================================================== */
+
+function renderVictimResourceHistory(history) {
+    const container = $('#victimResourceHistory');
+
+    if (!container) return;
+
+    const requests = Array.isArray(history)
+        ? history
+        : Array.isArray(history?.history)
+            ? history.history
+            : Array.isArray(history?.requests)
+                ? history.requests
+                : [];
+
+    if (!requests.length) {
+        container.innerHTML = `
+            <p class="muted">
+                You have not submitted any resource requests yet.
+            </p>
+        `;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="tablewrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Resource</th>
+                        <th>Quantity</th>
+                        <th>Status</th>
+                        <th>Requested on</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${requests.map(item => `
+                        <tr>
+                            <td>
+                                ${escapeHtml(
+                                    item.resource_name ||
+                                    item.resource ||
+                                    item.resource_request ||
+                                    '—'
+                                )}
+                            </td>
+
+                            <td>
+                                ${escapeHtml(
+                                    String(
+                                        item.quantity ??
+                                        item.requested_quantity ??
+                                        '—'
+                                    )
+                                )}
+                            </td>
+
+                            <td>
+                                ${badge(
+                                    item.status ||
+                                    item.resource_status ||
+                                    'Pending'
+                                )}
+                            </td>
+
+                            <td>
+                                ${escapeHtml(
+                                    formatRequestDate(
+                                        item.created_at ||
+                                        item.request_date ||
+                                        item.requested_at
+                                    )
+                                )}
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+
+function formatRequestDate(value) {
+    if (!value) return '—';
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return String(value);
+    }
+
+    return date.toLocaleString();
+}
 
 /* =====================================================
    VICTIM PORTAL
 ===================================================== */
 
 async function loadVictimPortal() {
+    const id =
+        session?.user?.victim_id ??
+        session?.user?.victimId;
+
+    if (!id) {
+        toast('Victim session is invalid');
+        return;
+    }
 
     try {
+        const [victimResult, shelterResult] =
+            await Promise.allSettled([
+                api(`/victim/${id}/full`),
+                api('/shelters')
+            ]);
 
-        const id =
-            session.user.victim_id;
+        if (victimResult.status === 'rejected') {
+            throw victimResult.reason;
+        }
 
+        const victim = victimResult.value;
 
-        const [
-            victim,
-            shelters
-        ] = await Promise.all([
+        const shelters = shelterResult.status === 'fulfilled'
+            ? shelterResult.value
+            : [];
 
-            api(
-                '/victim/' +
-                id +
-                '/full'
-            ),
-
-            api(
-                '/shelters'
-            )
-
-        ]);
-
-
-        session.user =
-            victim;
-
+        session.user = {
+            ...session.user,
+            ...victim
+        };
 
         localStorage.setItem(
-
             'resqsimSession',
-
             JSON.stringify(session)
-
         );
 
+        if ($('#vName')) {
+            $('#vName').textContent = `Hello, ${victim.name || 'Victim'}`;
+        }
 
-        $('#vName').textContent =
-            'Hello, ' +
-            victim.name;
+        if ($('#vStatus')) {
+            $('#vStatus').textContent =
+                victim.status || 'Registered';
+        }
 
-
-        $('#vStatus').textContent =
-            victim.status ||
-            'Registered';
-
-
-        $('#victimStatusCard').innerHTML = `
-
-            <div class="status-list">
-
-                <div>
-
-                    <span>
-                        Emergency
-                    </span>
-
-                    <b>
-                        ${
-                            escapeHtml(
-                                victim.emergency_type ||
-                                'No SOS yet'
-                            )
-                        }
-                    </b>
-
-                </div>
-
-
-                <div>
-
-                    <span>
-                        Severity
-                    </span>
-
-                    <b>
-                        ${
-                            victim.severity ||
-                            '—'
-                        }
-                    </b>
-
-                </div>
-
-
-                <div>
-
-                    <span>
-                        Rescue team
-                    </span>
-
-                    <b>
-                        ${
-                            escapeHtml(
-                                victim.team_name ||
-                                'Not assigned'
-                            )
-                        }
-                    </b>
-
-                </div>
-
-
-                <div>
-
-                    <span>
-                        Shelter
-                    </span>
-
-                    <b>
-                        ${
-                            escapeHtml(
-                                victim.shelter_name ||
-                                'Not assigned'
-                            )
-                        }
-                    </b>
-
-                </div>
-
-
-                <div>
-
-                    <span>
-                        Resources
-                    </span>
-
-                    <b>
-                        ${
-                            escapeHtml(
-                                victim.resource_status ||
-                                'No request'
-                            )
-                        }
-                    </b>
-
-                </div>
-
-            </div>
-
-        `;
-
-
-        $('#victimShelters').innerHTML =
-
-            shelters
-                .slice(0, 4)
-                .map(s => `
-
-                    <div class="shelter-mini">
-
-                        <b>
-                            ${escapeHtml(
-                                s.shelter_name
-                            )}
-                        </b>
-
-                        <span>
-                            ${s.available_beds}
-                            beds available
-                        </span>
-
+        if ($('#victimStatusCard')) {
+            $('#victimStatusCard').innerHTML = `
+                <div class="status-list">
+                    <div>
+                        <span>Emergency</span>
+                        <b>${escapeHtml(
+                            victim.emergency_type || 'No SOS yet'
+                        )}</b>
                     </div>
 
-                `)
-                .join('')
+                    <div>
+                        <span>Severity</span>
+                        <b>${escapeHtml(
+                            String(victim.severity ?? '—')
+                        )}</b>
+                    </div>
 
-            ||
+                    <div>
+                        <span>Rescue team</span>
+                        <b>${escapeHtml(
+                            victim.team_name ||
+                            (victim.team_id
+                                ? `Team #${victim.team_id}`
+                                : 'Not assigned')
+                        )}</b>
+                    </div>
 
-            `
+                    <div>
+                        <span>Shelter</span>
+                        <b>${escapeHtml(
+                            victim.shelter_name || 'Not assigned'
+                        )}</b>
+                    </div>
 
-                <p class="muted">
-
-                    No shelter currently
-                    has capacity.
-
-                </p>
-
+                    <div>
+                        <span>Resources</span>
+                        <b>${escapeHtml(
+                            victim.resource_status || 'No request'
+                        )}</b>
+                    </div>
+                </div>
             `;
+        }
 
+        if ($('#victimShelters')) {
+            $('#victimShelters').innerHTML =
+                (shelters || []).slice(0, 4).map(shelter => `
+                    <div class="shelter-mini">
+                        <b>${escapeHtml(
+                            shelter.shelter_name || 'Shelter'
+                        )}</b>
 
-        await loadVictimResourceOptions();
+                        <span>
+                            ${escapeHtml(
+                                String(shelter.available_beds ?? 0)
+                            )}
+                            beds available
+                        </span>
+                    </div>
+                `).join('') || `
+                    <p class="muted">
+                        No shelter currently has capacity.
+                    </p>
+                `;
+        }
 
+        // Tracking and history are loaded separately so that
+        // a failure in either does not prevent the main portal loading.
+        await Promise.allSettled([
+            loadVictimTracking(id),
+            loadVictimResourceHistory(id),
+            loadVictimResourceOptions()
+        ]);
 
     } catch (error) {
-
-        toast(
-            error.message
-        );
+        console.error('Victim portal error:', error);
+        toast(error.message || 'Could not load victim portal');
     }
 }
 
+
+/* =====================================================
+   LOAD LIVE TRACKING FROM BACKEND
+===================================================== */
+
+async function loadVictimTracking(victimId) {
+    const container = $('#victimTracking');
+
+    if (!container) return;
+
+    try {
+        const tracking = await api(
+            `/victims/${victimId}/track`
+        );
+
+        renderVictimTracking(tracking);
+    } catch (error) {
+        console.error('Tracking error:', error);
+
+        container.innerHTML = `
+            <p class="muted">
+                Live tracking could not be loaded.
+                Please refresh or try again later.
+            </p>
+        `;
+    }
+}
+
+
+/* =====================================================
+   LOAD RESOURCE REQUEST HISTORY FROM BACKEND
+===================================================== */
+
+async function loadVictimResourceHistory(victimId) {
+    const container = $('#victimResourceHistory');
+
+    if (!container) return;
+
+    try {
+        const history = await api(
+            `/victims/${victimId}/resource-history`
+        );
+
+        renderVictimResourceHistory(history);
+    } catch (error) {
+        console.error('Resource history error:', error);
+
+        container.innerHTML = `
+            <p class="muted">
+                Resource history could not be loaded.
+                Check that the history endpoint is available in the backend.
+            </p>
+        `;
+    }
+}
 
 /* =====================================================
    LOAD VICTIM RESOURCE OPTIONS
@@ -2776,7 +3913,16 @@ async function loadVictimResourceOptions() {
 
         const inventory =
             await api(
-                '/resources/inventory/available'
+                '/admin/inventory'
+            );
+
+
+        const available =
+            (inventory || []).filter(
+                x =>
+                    Number(
+                        x.remaining_quantity
+                    ) > 0
             );
 
 
@@ -2784,7 +3930,7 @@ async function loadVictimResourceOptions() {
 
             '<option value="">Select resource</option>' +
 
-            inventory
+            available
                 .map(x => `
 
                     <option
@@ -2800,6 +3946,7 @@ async function loadVictimResourceOptions() {
                         )}
 
                         —
+
                         ${x.remaining_quantity}
                         available
 
@@ -2809,7 +3956,7 @@ async function loadVictimResourceOptions() {
                 .join('');
 
 
-        if (!inventory.length) {
+        if (!available.length) {
 
             resourceSelect.innerHTML =
                 '<option value="">No resources available</option>';
@@ -2907,7 +4054,9 @@ if (resourceForm) {
 
 
                 if (
-                    Number.isFinite(available) &&
+                    Number.isFinite(
+                        available
+                    ) &&
                     quantity > available
                 ) {
 
@@ -2953,7 +4102,7 @@ if (resourceForm) {
                 );
 
 
-                loadVictimPortal();
+                await loadVictimPortal();
 
             } catch (error) {
 
@@ -2979,19 +4128,27 @@ async function victimSendSos(e) {
             new FormData(e.target);
 
 
+        const object =
+            Object.fromEntries(
+                form
+            );
+
+
+        object.victimId =
+            session.user.victim_id;
+
+
         await api(
 
-            `/victims/${
-                session.user.victim_id
-            }/sos`,
+            '/victims/sos',
 
             {
 
-                method: 'PUT',
+                method: 'POST',
 
                 body:
                     JSON.stringify(
-                        Object.fromEntries(form)
+                        object
                     )
 
             }
@@ -3012,7 +4169,7 @@ async function victimSendSos(e) {
         );
 
 
-        loadVictimPortal();
+        await loadVictimPortal();
 
     } catch (error) {
 
@@ -3029,13 +4186,72 @@ async function victimSendSos(e) {
 
 function escapeHtml(value) {
 
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+    return String(
+        value ?? ''
+    )
+
+        .replace(
+            /&/g,
+            '&amp;'
+        )
+
+        .replace(
+            /</g,
+            '&lt;'
+        )
+
+        .replace(
+            />/g,
+            '&gt;'
+        )
+
+        .replace(
+            /"/g,
+            '&quot;'
+        )
+
+        .replace(
+            /'/g,
+            '&#039;'
+        );
 }
+
+/* =====================================================
+   VICTIM PORTAL AUTO REFRESH
+===================================================== */
+
+let victimRefreshTimer = null;
+
+function startVictimAutoRefresh() {
+    stopVictimAutoRefresh();
+
+    if (session?.role !== 'victim') return;
+
+    victimRefreshTimer = setInterval(() => {
+        if (
+            session?.role === 'victim' &&
+            !document.hidden
+        ) {
+            loadVictimPortal();
+        }
+    }, 15000);
+}
+
+function stopVictimAutoRefresh() {
+    if (victimRefreshTimer !== null) {
+        clearInterval(victimRefreshTimer);
+        victimRefreshTimer = null;
+    }
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        stopVictimAutoRefresh();
+    } else if (session?.role === 'victim') {
+        loadVictimPortal();
+        startVictimAutoRefresh();
+    }
+});
 
 
 /* =====================================================

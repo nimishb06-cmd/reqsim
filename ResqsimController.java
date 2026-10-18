@@ -2,6 +2,7 @@ package com.resqsim.web;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -198,6 +199,19 @@ public class ResqsimController {
                         "WHERE status='SOS Pending'"
                 );
 
+        int resolvedSOS =
+                count(
+                        "SELECT COUNT(*) FROM VICTIM " +
+                        "WHERE status IN ('Resolved','Completed')"
+                );
+
+        int highPrioritySOS =
+                count(
+                        "SELECT COUNT(*) FROM VICTIM " +
+                        "WHERE status='SOS Pending' " +
+                        "AND severity >= 4"
+                );
+
         int activeTeams =
                 count(
                         "SELECT COUNT(*) FROM RESCUE_TEAM " +
@@ -232,6 +246,8 @@ public class ResqsimController {
         return Map.of(
                 "victims", victims,
                 "pendingSOS", pendingSOS,
+                "resolvedSOS", resolvedSOS,
+                "highPrioritySOS", highPrioritySOS,
                 "activeTeams", activeTeams,
                 "availableTeams", availableTeams,
                 "volunteers", volunteers,
@@ -495,20 +511,22 @@ public class ResqsimController {
         String requestText =
                 resource + ": " + quantity;
 
-        int updated =
-                db.update(
-                        "UPDATE VICTIM SET " +
-                        "resource_request=?, " +
-                        "resource_status='Pending' " +
-                        "WHERE victim_id=?",
-                        requestText,
-                        id
-                );
-
-        return result(
-                updated,
-                "Resource request submitted"
+        int updated = db.update(
+                "UPDATE VICTIM SET resource_request=?, " +
+                "resource_status='Pending' WHERE victim_id=?",
+                requestText, id
         );
+
+        if (updated > 0) {
+            db.update(
+                    "INSERT INTO RESOURCE_REQUEST_HISTORY " +
+                    "(victim_id, resource_name, quantity, request_status) " +
+                    "VALUES (?, ?, ?, 'Pending')",
+                    id, resource, quantity
+            );
+        }
+
+        return result(updated, "Resource request submitted");
     }
 
 
@@ -559,20 +577,16 @@ public class ResqsimController {
 
         try {
 
-            List<Map<String, Object>> rows =
-                    db.queryForList(
-                            "SELECT " +
-                            "victim_id, " +
-                            "name, " +
-                            "location, " +
-                            "status, " +
-                            "team_id, " +
-                            "resource_request, " +
-                            "resource_status " +
-                            "FROM VICTIM " +
-                            "WHERE victim_id=?",
-                            id
-                    );
+            List<Map<String, Object>> rows = db.queryForList(
+                    "SELECT v.victim_id, v.name, v.location, " +
+                    "v.emergency_type, v.severity, v.status, v.team_id, " +
+                    "rt.team_name, rt.leader AS team_leader, " +
+                    "rt.vehicle AS team_vehicle, rt.rescue_status, " +
+                    "v.resource_request, v.resource_status " +
+                    "FROM VICTIM v LEFT JOIN RESCUE_TEAM rt " +
+                    "ON v.team_id=rt.team_id WHERE v.victim_id=?",
+                    id
+            );
 
             if (rows.isEmpty()) {
                 return ResponseEntity.notFound().build();
@@ -588,6 +602,36 @@ public class ResqsimController {
                             "success", false,
                             "message", e.getMessage()
                     ));
+        }
+    }
+
+
+    /* =========================================================
+       VICTIM RESOURCE REQUEST HISTORY
+       ========================================================= */
+
+    @GetMapping("/victims/{id}/resource-history")
+    public ResponseEntity<?> victimResourceHistory(@PathVariable int id) {
+        try {
+            Integer exists = db.queryForObject(
+                    "SELECT COUNT(*) FROM VICTIM WHERE victim_id=?",
+                    Integer.class, id
+            );
+            if (exists == null || exists == 0) {
+                return ResponseEntity.notFound().build();
+            }
+            return ResponseEntity.ok(db.queryForList(
+                    "SELECT history_id, victim_id, resource_name, quantity, " +
+                    "request_status, requested_at " +
+                    "FROM RESOURCE_REQUEST_HISTORY WHERE victim_id=? " +
+                    "ORDER BY requested_at DESC, history_id DESC",
+                    id
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
         }
     }
 
@@ -630,6 +674,29 @@ public class ResqsimController {
                 "WHERE v.status='SOS Pending' " +
                 "ORDER BY v.severity DESC, " +
                 "v.victim_id ASC"
+        );
+    }
+
+
+    /* =========================================================
+       MARK SOS AS RESOLVED
+       ========================================================= */
+
+    @PutMapping("/admin/sos/{id}/resolve")
+    public Map<String, Object> resolveSos(
+            @PathVariable int id) {
+
+        int updated = db.update(
+                "UPDATE VICTIM SET status='Resolved' " +
+                "WHERE victim_id=? AND status='SOS Pending'",
+                id
+        );
+
+        return result(
+                updated,
+                updated > 0
+                        ? "SOS marked as resolved"
+                        : "Pending SOS not found for this victim"
         );
     }
 
@@ -749,40 +816,39 @@ public class ResqsimController {
        ========================================================= */
 
     @PutMapping("/admin/resources/{id}")
+    @Transactional
     public Map<String, Object> allocateResource(
             @PathVariable int id) {
 
         try {
-
-            List<Map<String, Object>> rows =
-                    db.queryForList(
-                            "SELECT resource_request " +
-                            "FROM VICTIM " +
-                            "WHERE victim_id=?",
-                            id
-                    );
+            List<Map<String, Object>> rows = db.queryForList(
+                    "SELECT resource_request, resource_status " +
+                    "FROM VICTIM WHERE victim_id=? FOR UPDATE",
+                    id
+            );
 
             if (rows.isEmpty()) {
-
                 return Map.of(
                         "success", false,
                         "message", "Victim not found"
                 );
             }
 
-            String request =
-                    s(
-                            rows.get(0),
-                            "resource_request"
-                    );
+            Map<String, Object> victim = rows.get(0);
+            String request = s(victim, "resource_request");
+            String status = s(victim, "resource_status");
 
-            if (request == null ||
-                request.isBlank()) {
-
+            if (request == null || request.isBlank()) {
                 return Map.of(
                         "success", false,
-                        "message",
-                        "No resource request found"
+                        "message", "No resource request found"
+                );
+            }
+
+            if (!"Pending".equalsIgnoreCase(status)) {
+                return Map.of(
+                        "success", false,
+                        "message", "This resource request is not pending"
                 );
             }
 
@@ -790,110 +856,105 @@ public class ResqsimController {
             int quantity = 1;
 
             if (request.contains(":")) {
-
-                String[] parts =
-                        request.split(":");
-
-                resourceName =
-                        parts[0].trim();
+                String[] parts = request.split(":", 2);
+                resourceName = parts[0].trim();
 
                 try {
-
-                    quantity =
-                            Integer.parseInt(
-                                    parts[1].trim()
-                            );
-
-                } catch (Exception ignored) {
+                    quantity = Integer.parseInt(parts[1].trim());
+                } catch (NumberFormatException ex) {
+                    return Map.of(
+                            "success", false,
+                            "message", "Invalid quantity in resource request"
+                    );
                 }
             }
 
-            List<Map<String, Object>> inv =
-                    db.queryForList(
-                            "SELECT " +
-                            "resource_id, " +
-                            "total_quantity, " +
-                            "allocated_quantity " +
-                            "FROM RESOURCE_INVENTORY " +
-                            "WHERE resource_name=? " +
-                            "FOR UPDATE",
-                            resourceName
-                    );
-
-            if (inv.isEmpty()) {
-
+            if (quantity <= 0) {
                 return Map.of(
                         "success", false,
-                        "message",
-                        "Resource not found in inventory"
+                        "message", "Requested quantity must be greater than zero"
                 );
             }
 
-            Map<String, Object> resource =
-                    inv.get(0);
+            // Lock the matching inventory row to prevent concurrent over-allocation.
+            List<Map<String, Object>> inventoryRows = db.queryForList(
+                    "SELECT resource_id, total_quantity, allocated_quantity " +
+                    "FROM RESOURCE_INVENTORY " +
+                    "WHERE LOWER(TRIM(resource_name))=LOWER(TRIM(?)) " +
+                    "FOR UPDATE",
+                    resourceName
+            );
 
-            int total =
-                    iNullable(
-                            resource,
-                            "total_quantity"
-                    );
+            if (inventoryRows.isEmpty()) {
+                return Map.of(
+                        "success", false,
+                        "message", "Resource not found in inventory"
+                );
+            }
 
-            int allocated =
-                    iNullable(
-                            resource,
-                            "allocated_quantity"
-                    );
-
-            int remaining =
-                    total - allocated;
+            Map<String, Object> resource = inventoryRows.get(0);
+            int total = iNullable(resource, "total_quantity");
+            int allocated = iNullable(resource, "allocated_quantity");
+            int remaining = total - allocated;
 
             if (remaining < quantity) {
-
                 return Map.of(
                         "success", false,
-                        "message",
-                        "Insufficient resource stock"
+                        "message", "Insufficient stock. Available: " + Math.max(remaining, 0)
                 );
             }
 
-            int updatedInventory =
-                    db.update(
-                            "UPDATE RESOURCE_INVENTORY " +
-                            "SET allocated_quantity=" +
-                            "allocated_quantity+? " +
-                            "WHERE resource_id=?",
-                            quantity,
-                            resource.get(
-                                    "resource_id"
-                            )
-                    );
+            int updatedInventory = db.update(
+                    "UPDATE RESOURCE_INVENTORY " +
+                    "SET allocated_quantity=allocated_quantity+? " +
+                    "WHERE resource_id=? " +
+                    "AND (total_quantity-allocated_quantity)>=?",
+                    quantity,
+                    resource.get("resource_id"),
+                    quantity
+            );
 
             if (updatedInventory == 0) {
-
-                return Map.of(
-                        "success", false,
-                        "message",
-                        "Inventory update failed"
+                throw new IllegalStateException(
+                        "Stock changed during allocation. Please refresh and try again."
                 );
             }
 
-            db.update(
-                    "UPDATE VICTIM SET " +
-                    "resource_status='Allocated' " +
-                    "WHERE victim_id=?",
+            int updatedVictim = db.update(
+                    "UPDATE VICTIM SET resource_status='Allocated' " +
+                    "WHERE victim_id=? AND resource_status='Pending'",
                     id
             );
 
+            if (updatedVictim > 0) {
+                db.update(
+                        "UPDATE RESOURCE_REQUEST_HISTORY " +
+                        "SET request_status='Allocated' " +
+                        "WHERE history_id=(SELECT history_id FROM (" +
+                        "SELECT history_id FROM RESOURCE_REQUEST_HISTORY " +
+                        "WHERE victim_id=? AND request_status='Pending' " +
+                        "ORDER BY requested_at DESC, history_id DESC LIMIT 1" +
+                        ") latest_request)",
+                        id
+                );
+            }
+
+            if (updatedVictim == 0) {
+                throw new IllegalStateException(
+                        "Request status changed during allocation. Transaction cancelled."
+                );
+            }
+
             return Map.of(
                     "success", true,
-                    "message",
-                    "Resource allocated successfully"
+                    "message", quantity + " unit(s) of " +
+                            resourceName + " allocated successfully"
             );
 
         } catch (Exception e) {
-
             throw new RuntimeException(
-                    e.getMessage()
+                    "Resource allocation failed: " + e.getMessage(),
+                    e
             );
         }
     }
@@ -935,12 +996,27 @@ public class ResqsimController {
        GET ALL RESCUE TEAMS
        ========================================================= */
 
-    @GetMapping("/teams")
+    
+        @GetMapping("/teams")
     public List<Map<String, Object>> teams() {
 
         return db.queryForList(
-                "SELECT * FROM RESCUE_TEAM " +
-                "ORDER BY team_id"
+                "SELECT " +
+                "rt.team_id, " +
+                "rt.team_name, " +
+                "rt.leader, " +
+                "rt.vehicle, " +
+                "rt.rescue_status, " +
+                "rt.victim_id, " +
+                "v.name AS victim_name, " +
+                "v.severity AS victim_severity, " +
+                "v.location AS victim_location, " +
+                "v.emergency_type AS victim_emergency_type, " +
+                "v.status AS victim_status " +
+                "FROM RESCUE_TEAM rt " +
+                "LEFT JOIN VICTIM v " +
+                "ON rt.victim_id = v.victim_id " +
+                "ORDER BY rt.team_id"
         );
     }
 

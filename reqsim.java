@@ -999,7 +999,584 @@ public class ResqsimController {
         }
     }
 
+/* =========================================================
+       ADMIN SHELTER ASSIGNMENT
+       ========================================================= */
 
+    @PutMapping("/admin/shelter")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> assignShelter(
+            @RequestBody Map<String, Object> b) {
+        int victimId = i(b, "victimId");
+        int shelterId = i(b, "shelterId");
+        boolean acquired = false;
+        try {
+            shelterSemaphore.acquire();
+            acquired = true;
+            List<Map<String, Object>> victims = db.queryForList(
+                    "SELECT victim_id, shelter_id FROM VICTIM WHERE victim_id=? FOR UPDATE", victimId);
+            if (victims.isEmpty()) return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Victim not found"));
+            List<Map<String, Object>> shelters = db.queryForList(
+                    "SELECT shelter_id, available_beds FROM SHELTER_MANAGER WHERE shelter_id=? FOR UPDATE", shelterId);
+            if (shelters.isEmpty()) return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Shelter not found"));
+            int available = ((Number) shelters.get(0).get("available_beds")).intValue();
+            Object oldValue = victims.get(0).get("shelter_id");
+            Integer oldShelter = oldValue == null ? null : ((Number) oldValue).intValue();
+            if (oldShelter != null && oldShelter == shelterId) return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Victim is already assigned to this shelter"));
+            if (available <= 0) return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Shelter is full"));
+            db.update("UPDATE SHELTER_MANAGER SET available_beds=available_beds-1 WHERE shelter_id=? AND available_beds>0", shelterId);
+            if (oldShelter != null) db.update("UPDATE SHELTER_MANAGER SET available_beds=available_beds+1 WHERE shelter_id=?", oldShelter);
+            db.update("UPDATE VICTIM SET shelter_id=?, status='Shelter Assigned' WHERE victim_id=?", shelterId, victimId);
+            return ResponseEntity.ok(Map.of("success", true, "message", "Shelter assigned successfully"));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ResponseEntity.status(503).body(Map.of("success", false, "message", "Shelter assignment interrupted"));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("success", false, "message", "Could not assign shelter: " + e.getMessage()));
+        } finally { if (acquired) shelterSemaphore.release(); }
+    }
+
+
+    /* =========================================================
+       REPORT
+       ========================================================= */
+
+    @GetMapping("/report")
+    public List<Map<String, Object>> report() {
+
+        return db.queryForList(
+                "SELECT " +
+                "v.victim_id, " +
+                "v.name AS victim_name, " +
+                "v.location, " +
+                "v.emergency_type, " +
+                "v.severity, " +
+                "v.status, " +
+                "rt.team_name, " +
+                "sm.shelter_name, " +
+                "v.resource_status " +
+                "FROM VICTIM v " +
+                "LEFT JOIN RESCUE_TEAM rt " +
+                "ON v.team_id=rt.team_id " +
+                "LEFT JOIN SHELTER_MANAGER sm " +
+                "ON v.shelter_id=sm.shelter_id " +
+                "ORDER BY v.victim_id DESC"
+        );
+    }
+
+
+    /* =========================================================
+       FCFS SCHEDULING
+       ========================================================= */
+
+    @PostMapping("/scheduling/fcfs")
+    public Map<String, Object> fcfs(
+            @RequestBody List<Map<String, Object>> jobs) {
+
+        if (jobs == null ||
+            jobs.isEmpty()) {
+
+            return Map.of(
+                    "success", false,
+                    "message",
+                    "No scheduling jobs supplied"
+            );
+        }
+
+        List<Map<String, Object>> sorted =
+                new ArrayList<>(jobs);
+
+        sorted.sort(
+                Comparator.comparingInt(
+                        (Map<String, Object> x) ->
+                                i(x, "arrival")
+                )
+        );
+
+        int currentTime = 0;
+
+        double totalWaiting = 0;
+        double totalTurnaround = 0;
+
+        List<Map<String, Object>> result =
+                new ArrayList<>();
+
+        for (Map<String, Object> job : sorted) {
+
+            int pid = i(job, "pid");
+            int arrival = i(job, "arrival");
+            int burst = i(job, "burst");
+
+            if (currentTime < arrival) {
+                currentTime = arrival;
+            }
+
+            int start = currentTime;
+
+            int completion =
+                    start + burst;
+
+            int turnaround =
+                    completion - arrival;
+
+            int waiting =
+                    turnaround - burst;
+
+            totalWaiting += waiting;
+            totalTurnaround += turnaround;
+
+            Map<String, Object> row =
+                    new LinkedHashMap<>();
+
+            row.put("pid", pid);
+            row.put("arrival", arrival);
+            row.put("burst", burst);
+            row.put("start", start);
+            row.put("completion", completion);
+            row.put("waiting", waiting);
+            row.put("turnaround", turnaround);
+
+            result.add(row);
+
+            currentTime = completion;
+        }
+
+        return Map.of(
+                "success", true,
+                "jobs", result,
+                "averageWaitingTime",
+                totalWaiting / result.size(),
+                "averageTurnaroundTime",
+                totalTurnaround / result.size()
+        );
+    }
+
+
+    /* =========================================================
+       PRIORITY SCHEDULING
+
+       Higher priority number = higher priority
+
+       IMPORTANT:
+       This version intentionally uses normal loops instead
+       of stream Comparator lambdas so that Java 17 does not
+       produce the Object -> Map<String,Object> compilation
+       error.
+       ========================================================= */
+
+    @PostMapping("/scheduling/priority")
+    public Map<String, Object> priority(
+            @RequestBody List<Map<String, Object>> jobs) {
+
+        if (jobs == null ||
+            jobs.isEmpty()) {
+
+            return Map.of(
+                    "success", false,
+                    "message",
+                    "No scheduling jobs supplied"
+            );
+        }
+
+        List<Map<String, Object>> pending =
+                new ArrayList<>(jobs);
+
+        List<Map<String, Object>> result =
+                new ArrayList<>();
+
+        int currentTime = 0;
+
+        double totalWaiting = 0;
+
+        double totalTurnaround = 0;
+
+
+        while (!pending.isEmpty()) {
+
+            /*
+             * Find all processes that have arrived.
+             */
+
+            List<Map<String, Object>> available =
+                    new ArrayList<>();
+
+            for (Map<String, Object> job : pending) {
+
+                int arrival =
+                        i(job, "arrival");
+
+                if (arrival <= currentTime) {
+
+                    available.add(job);
+                }
+            }
+
+
+            /*
+             * If no process has arrived,
+             * move time to the earliest arrival.
+             */
+
+            if (available.isEmpty()) {
+
+                int earliestArrival =
+                        Integer.MAX_VALUE;
+
+                Map<String, Object> earliestJob =
+                        null;
+
+                for (Map<String, Object> job : pending) {
+
+                    int arrival =
+                            i(job, "arrival");
+
+                    if (arrival < earliestArrival) {
+
+                        earliestArrival =
+                                arrival;
+
+                        earliestJob =
+                                job;
+                    }
+                }
+
+                if (earliestJob == null) {
+                    break;
+                }
+
+                currentTime =
+                        earliestArrival;
+
+                available.clear();
+
+                for (Map<String, Object> job : pending) {
+
+                    int arrival =
+                            i(job, "arrival");
+
+                    if (arrival <= currentTime) {
+
+                        available.add(job);
+                    }
+                }
+            }
+
+
+            /*
+             * Select highest-priority process.
+             *
+             * Higher priority number wins.
+             *
+             * If priority is equal,
+             * earlier arrival wins.
+             */
+
+            Map<String, Object> selected =
+                    available.get(0);
+
+            for (Map<String, Object> job : available) {
+
+                int jobPriority =
+                        i(job, "priority");
+
+                int selectedPriority =
+                        i(selected, "priority");
+
+                int jobArrival =
+                        i(job, "arrival");
+
+                int selectedArrival =
+                        i(selected, "arrival");
+
+
+                if (jobPriority > selectedPriority) {
+
+                    selected = job;
+
+                } else if (
+                        jobPriority ==
+                                selectedPriority
+                        &&
+                        jobArrival <
+                                selectedArrival
+                ) {
+
+                    selected = job;
+                }
+            }
+
+
+            /*
+             * Remove selected process.
+             */
+
+            pending.remove(selected);
+
+
+            /*
+             * Process information.
+             */
+
+            int pid =
+                    i(selected, "pid");
+
+            int arrival =
+                    i(selected, "arrival");
+
+            int burst =
+                    i(selected, "burst");
+
+            int priority =
+                    i(selected, "priority");
+
+
+            /*
+             * Start time.
+             */
+
+            int start =
+                    currentTime;
+
+
+            /*
+             * Completion time.
+             */
+
+            int completion =
+                    start + burst;
+
+
+            /*
+             * Turnaround Time:
+             *
+             * TAT = CT - AT
+             */
+
+            int turnaround =
+                    completion - arrival;
+
+
+            /*
+             * Waiting Time:
+             *
+             * WT = TAT - BT
+             */
+
+            int waiting =
+                    turnaround - burst;
+
+
+            totalWaiting += waiting;
+
+            totalTurnaround += turnaround;
+
+
+            /*
+             * Create result row.
+             */
+
+            Map<String, Object> row =
+                    new LinkedHashMap<>();
+
+            row.put(
+                    "pid",
+                    pid
+            );
+
+            row.put(
+                    "arrival",
+                    arrival
+            );
+
+            row.put(
+                    "burst",
+                    burst
+            );
+
+            row.put(
+                    "priority",
+                    priority
+            );
+
+            row.put(
+                    "start",
+                    start
+            );
+
+            row.put(
+                    "completion",
+                    completion
+            );
+
+            row.put(
+                    "waiting",
+                    waiting
+            );
+
+            row.put(
+                    "turnaround",
+                    turnaround
+            );
+
+            result.add(row);
+
+
+            /*
+             * Move CPU time forward.
+             */
+
+            currentTime =
+                    completion;
+        }
+
+
+        /*
+         * Return result.
+         */
+
+        return Map.of(
+                "success", true,
+                "jobs", result,
+                "averageWaitingTime",
+                totalWaiting / result.size(),
+                "averageTurnaroundTime",
+                totalTurnaround / result.size()
+        );
+    }
+
+
+    /* =========================================================
+       HELPER: COUNT
+       ========================================================= */
+
+    private int count(String sql) {
+
+        try {
+
+            Integer value =
+                    db.queryForObject(
+                            sql,
+                            Integer.class
+                    );
+
+            return value == null
+                    ? 0
+                    : value;
+
+        } catch (Exception e) {
+
+            return 0;
+        }
+    }
+
+
+    /* =========================================================
+       HELPER: INTEGER
+       ========================================================= */
+
+    private int i(
+            Map<String, Object> map,
+            String key) {
+
+        Object value =
+                map.get(key);
+
+        if (value == null) {
+            return 0;
+        }
+
+        if (value instanceof Number) {
+
+            return ((Number) value)
+                    .intValue();
+        }
+
+        try {
+
+            return Integer.parseInt(
+                    value.toString()
+            );
+
+        } catch (Exception e) {
+
+            return 0;
+        }
+    }
+
+
+    /* =========================================================
+       HELPER: NULLABLE INTEGER
+       ========================================================= */
+
+    private int iNullable(
+            Map<String, Object> map,
+            String key) {
+
+        Object value =
+                map.get(key);
+
+        if (value == null) {
+            return 0;
+        }
+
+        if (value instanceof Number) {
+
+            return ((Number) value)
+                    .intValue();
+        }
+
+        try {
+
+            return Integer.parseInt(
+                    value.toString()
+            );
+
+        } catch (Exception e) {
+
+            return 0;
+        }
+    }
+
+
+    /* =========================================================
+       HELPER: STRING
+       ========================================================= */
+
+    private String s(
+            Map<String, Object> map,
+            String key) {
+
+        Object value =
+                map.get(key);
+
+        return value == null
+                ? ""
+                : value.toString();
+    }
+
+
+    /* =========================================================
+       HELPER: RESULT
+       ========================================================= */
+
+    private Map<String, Object> result(
+            int updated,
+            String message) {
+
+        return Map.of(
+                "success",
+                updated > 0,
+
+                "updated",
+                updated,
+
+                "message",
+                updated > 0
+                        ? message
+                        : "No record was updated"
+        );
+    }
+}
 
 
 
